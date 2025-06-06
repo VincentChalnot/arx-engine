@@ -1,0 +1,23 @@
+[package]
+name = "arx-engine"
+version = "0.1.0"
+edition = "2021"
+authors = ["Vincent"]
+description = "A library for the abstract game Arx"
+
+[dependencies]
+clap = { version = "4.4", features = ["derive"] }
+crossterm = "0.29.0"
+ratatui = "0.29.0"
+base64 = "0.22"
+wgpu = "25.0"
+tokio = { version = "1.0", features = ["full"] }
+bytemuck = { version = "1.14", features = ["derive"] }
+
+[lib]
+name = "arx_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "arx"
+path = "src/main.rs"
