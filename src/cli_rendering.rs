@@ -43,7 +43,7 @@ pub fn display_board(board: &Board) {
     println!();
 }
 
-fn display_stack(piece: &Piece) -> String {
+pub fn display_stack(piece: &Piece) -> String {
     let mut output: String = String::new();
 
     if let Some(ref top_piece) = piece.top {

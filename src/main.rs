@@ -1,4 +1,4 @@
-use arx_engine::{display_board, Board, Position, BOARD_DIMENSION, BOARD_SIZE};
+use arx_engine::{cli_rendering::display_stack, display_board, Game, Position, BOARD_DIMENSION, BOARD_SIZE};
 use clap::{Parser, Subcommand, Args};
 use base64::{Engine as _, engine::general_purpose};
 
@@ -32,39 +32,40 @@ struct ShowMovesArgs {
 
 fn main() {
     let cli = Cli::parse();
-    let board = Board::new();
+    let game = Game::new();
 
     match &cli.command {
         Some(Commands::Play) => {
-            display_board(&board);
+            display_board(game.board());
         }
         Some(Commands::Export) => {
-            let mut all_bytes = Vec::new();
-            for line in board.to_binary().iter() {
-                all_bytes.extend_from_slice(&line.to_le_bytes());
+            let all_bytes = game.to_binary();
+            let mut byte_vec = Vec::new();
+            for byte in all_bytes.iter() {
+                byte_vec.push(*byte);
             }
-            println!("{}", general_purpose::STANDARD.encode(&all_bytes));
+            println!("{}", general_purpose::STANDARD.encode(&byte_vec));
         }
         Some(Commands::Import(args)) => {
             match general_purpose::STANDARD.decode(&args.data) {
                 Ok(bytes) => {
-                    // Convert bytes back to [u8; 80]
+                    // Convert bytes back to [u8; 81]
                     if bytes.len() != BOARD_SIZE + 1 {
                         eprintln!("Invalid data length: expected {} bytes, got {}", BOARD_SIZE + 1, bytes.len());
                         return;
                     }
                     
                     let mut board_data = [0; BOARD_SIZE + 1];
-                    for (i, chunk) in bytes.chunks_exact(1).enumerate() {
-                        board_data[i] = u8::from_le_bytes(chunk.try_into().unwrap());
+                    for (i, &byte) in bytes.iter().enumerate() {
+                        board_data[i] = byte;
                     }
                     
-                    match Board::from_binary(board_data) {
-                        Ok(imported_board) => {
-                            display_board(&imported_board);
+                    match Game::from_binary(board_data) {
+                        Ok(imported_game) => {
+                            display_board(imported_game.board());
                         }
                         Err(e) => {
-                            eprintln!("Failed to create board from data: {}", e);
+                            eprintln!("Failed to create game from data: {}", e);
                         }
                     }
                 }
@@ -74,14 +75,15 @@ fn main() {
             }
         }
         Some(Commands::ShowMoves(args)) => {
+            display_board(game.board());
             if let Some(coordinates) = &args.coordinates {
                 let position = parse_position(coordinates).unwrap_or_else(|err| {
                     eprintln!("Error parsing position: {}", err);
                     std::process::exit(1);
                 });
-                show_moves_for_position(&board, &position, true);
+                show_moves_for_position(&game, &position, true);
             } else {
-                show_all_moves(&board);
+                show_all_moves(&game);
             }
         }
         None => {
@@ -89,24 +91,30 @@ fn main() {
         }
     }
 
-    fn show_all_moves(board: &Board) {
+    fn show_all_moves(game: &Game) {
         for y in 0..BOARD_DIMENSION {
             for x in 0..BOARD_DIMENSION {
                 let position = Position { x, y };
-                show_moves_for_position(board, &position, false);
+                show_moves_for_position(game, &position, false);
             }
         }
     }
 
-    fn show_moves_for_position(board: &Board, position: &Position, display_empty_message: bool) {        
-        let moves = board.get_moves(position);
+    fn show_moves_for_position(game: &Game, position: &Position, display_empty_message: bool) {        
+        let moves = game.get_moves(position);
         if moves.is_empty() {
             if display_empty_message {
                 println!("No moves available for position {}.", position.to_string());
             }
             return;
         }
-        println!("Available moves for position {}: ", position.to_string());
+        let piece = game.board().get_piece(position);
+        let piece_string = if let Some(piece) = piece {
+            display_stack(piece)
+        } else {
+            "?".to_string()
+        };
+        println!("Available moves for {}@{}: ", piece_string, position.to_string());
         for m in moves.iter() {
             print!(" - {}", m.to.to_string());
             if m.unstackable {
