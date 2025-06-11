@@ -40,3 +40,8 @@ Initial board positions are as follow:
 | | |J| | | |C| | |
 |B|D|P|G|K|G|P|D|B|
 ```
+
+
+## Notes:
+Potential rule changes to make:
+- Switch Guards and Paladins?

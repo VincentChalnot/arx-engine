@@ -349,6 +349,41 @@ impl Board {
         Ok(new_piece) // Return the top piece that was unstacked
     }
 
+    /// Stack a moving piece onto an existing piece at the given position
+    /// Returns an error if stacking is not allowed
+    pub fn stack_piece(&mut self, position: &Position, moving_piece: Piece) -> Result<(), String> {
+        let existing_piece = self.get_piece(position);
+        if existing_piece.is_none() {
+            return Err("No piece at position to stack onto".to_string());
+        }
+        let existing_piece = existing_piece.unwrap();
+
+        // Check if stacking is allowed
+        if !existing_piece.is_stackable() {
+            return Err("Cannot stack onto this piece (King or already stacked)".to_string());
+        }
+
+        // Check if pieces are same color
+        if existing_piece.color != moving_piece.color {
+            return Err("Cannot stack pieces of different colors".to_string());
+        }
+
+        // Check if moving piece is a single piece (not already stacked)
+        if moving_piece.top.is_some() {
+            return Err("Cannot stack an already stacked piece".to_string());
+        }
+
+        // Create new stacked piece: moving piece goes on top, existing piece becomes bottom
+        let stacked_piece = Piece {
+            color: existing_piece.color,
+            bottom: existing_piece.bottom,
+            top: Some(moving_piece.bottom),
+        };
+
+        self.set_piece(position, Some(stacked_piece));
+        Ok(())
+    }
+
     pub fn to_binary(&self) -> [u8; BOARD_SIZE + 1] {
         let mut binary = [0; BOARD_SIZE + 1];
         for (i, piece_opt) in self.data.iter().enumerate() {

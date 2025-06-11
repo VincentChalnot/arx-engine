@@ -126,8 +126,26 @@ impl Game {
             new_board.set_piece(&mv.from, None);
         }
 
-        // Move the piece to the 'to' position
-        new_board.set_piece(&mv.to, Some(target_piece));
+        // Check what's at the destination position
+        let destination_piece = new_board.get_piece(&mv.to);
+        
+        if destination_piece.is_none() {
+            // Empty square: just place the piece
+            new_board.set_piece(&mv.to, Some(target_piece));
+        } else {
+            let destination_piece = destination_piece.unwrap();
+            
+            if destination_piece.color != target_piece.color {
+                // Enemy piece: capture it (replace with our piece)
+                new_board.set_piece(&mv.to, Some(target_piece));
+            } else {
+                // Friendly piece: attempt to stack
+                if let Err(e) = new_board.stack_piece(&mv.to, target_piece) {
+                    return Err(format!("Cannot complete move: {}", e));
+                }
+            }
+        }
+        
         new_board.set_white_to_move(!new_board.is_white_to_move()); // Switch turn
 
         Ok(new_board)
@@ -324,7 +342,7 @@ impl Game {
         max_distance: isize,
     ) {
         for &(dx, dy) in directions {
-            for mult in 1..max_distance {
+            for mult in 1..=max_distance {
                 if let Some(target_position) = position.get_new(dx * mult, dy * mult) {
                     if !self.explore_position(
                         position,

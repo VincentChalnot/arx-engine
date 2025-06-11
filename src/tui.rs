@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color as RatatuiColor, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+    widgets::{Block, Borders, Paragraph},
     Frame, Terminal,
 };
 use std::io;
@@ -118,9 +118,13 @@ impl App {
         if let Some(ref top_piece) = piece.top {
             output.push_str(&self.piece_to_char(top_piece));
             output.push('+');
+            output.push_str(&self.piece_to_char(&piece.bottom));
+        } else {
+            output.push_str(" ");
+            output.push_str(&self.piece_to_char(&piece.bottom));
+            output.push_str(" ");
         }
         
-        output.push_str(&self.piece_to_char(&piece.bottom));
         output
     }
 
@@ -252,19 +256,41 @@ fn ui(f: &mut Frame, app: &App) {
 fn render_board(f: &mut Frame, app: &App, area: Rect) {
     let board = app.game.board();
     
-    // Create column headers (A-I)
-    let mut header_cells = vec![Cell::from("")]; // Empty cell for row labels
-    for col in 0..BOARD_DIMENSION {
-        let letter = ((b'A' + col as u8) as char).to_string();
-        header_cells.push(Cell::from(letter).style(Style::default().add_modifier(Modifier::BOLD)));
-    }
+    // Calculate the area for the actual board (leaving space for borders and labels)
+    let board_area = Rect {
+        x: area.x + 1,
+        y: area.y + 1,
+        width: area.width - 2,
+        height: area.height - 2,
+    };
     
-    let mut rows = vec![Row::new(header_cells)];
+    // Create the outer border
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Board");
+    f.render_widget(block, area);
     
-    // Create board rows
+    // Draw the board content manually using text with box drawing characters
+    let mut board_lines = Vec::new();
+    
+    // Header line with column labels
+    let header = String::from("     A   B   C   D   E   F   G   H   I");
+    board_lines.push(Line::from(Span::styled(header, Style::default().add_modifier(Modifier::BOLD))));
+    
+    // Top border
+    board_lines.push(Line::from("   ┏━━━┳━━━┳━━━┳━━━┳━━━┳━━━┳━━━┳━━━┳━━━┓"));
+    
+    // Board rows
     for y in 0..BOARD_DIMENSION {
-        let row_label = (9 - y).to_string();
-        let mut cells = vec![Cell::from(row_label).style(Style::default().add_modifier(Modifier::BOLD))];
+        if y > 0 {
+            // Middle border between rows
+            board_lines.push(Line::from("   ┣━━━╋━━━╋━━━╋━━━╋━━━╋━━━╋━━━╋━━━╋━━━┫"));
+        }
+        
+        let row_num = 9 - y;
+        let mut row_spans = vec![
+            Span::styled(format!(" {} ┃", row_num), Style::default().add_modifier(Modifier::BOLD)),
+        ];
         
         for x in 0..BOARD_DIMENSION {
             let position = Position::new(x, y);
@@ -273,7 +299,7 @@ fn render_board(f: &mut Frame, app: &App, area: Rect) {
             
             // Check if this position has a piece
             if let Some(piece) = board.get_piece(&position) {
-                cell_content = format!(" {} ", app.get_piece_display(piece));
+                cell_content = format!("{}", app.get_piece_display(piece));
                 
                 // Color the piece based on its color
                 cell_style = match piece.color {
@@ -291,21 +317,30 @@ fn render_board(f: &mut Frame, app: &App, area: Rect) {
                 cell_style = cell_style.bg(RatatuiColor::Green);
             }
             
-            cells.push(Cell::from(cell_content).style(cell_style));
+            row_spans.push(Span::styled(cell_content, cell_style));
+            row_spans.push(Span::raw("┃"));
         }
         
-        rows.push(Row::new(cells));
+        row_spans.push(Span::styled(format!(" {}", row_num), Style::default().add_modifier(Modifier::BOLD)));
+        board_lines.push(Line::from(row_spans));
     }
     
-    // Calculate column widths - make each board cell 4 characters wide
-    let mut column_widths = vec![Constraint::Length(2)]; // Row label column
-    for _ in 0..BOARD_DIMENSION {
-        column_widths.push(Constraint::Length(4));
-    }
+    // Bottom border
+    board_lines.push(Line::from("   ┗━━━┻━━━┻━━━┻━━━┻━━━┻━━━┻━━━┻━━━┻━━━┛"));
     
-    let table = Table::new(rows, column_widths)
-        .block(Block::default().borders(Borders::ALL).title("Board"))
-        .column_spacing(0);
+    // Footer with column labels
+    let footer = String::from("     A   B   C   D   E   F   G   H   I");
+    board_lines.push(Line::from(Span::styled(footer, Style::default().add_modifier(Modifier::BOLD))));
     
-    f.render_widget(table, area);
+    // Current player indicator
+    let current_player = if app.game.is_white_to_move() { "WHITE" } else { "BLACK" };
+    board_lines.push(Line::from(Span::styled(
+        format!("              {} TO MOVE", current_player),
+        Style::default().add_modifier(Modifier::BOLD)
+    )));
+    
+    let board_paragraph = Paragraph::new(board_lines)
+        .alignment(Alignment::Left);
+    
+    f.render_widget(board_paragraph, board_area);
 }
