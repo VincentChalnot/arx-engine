@@ -1,5 +1,3 @@
-use std::path::Iter;
-
 use crate::board::{Board, Color, Piece, PieceType, Position, BOARD_DIMENSION, BOARD_SIZE};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

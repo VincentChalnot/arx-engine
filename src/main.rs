@@ -1,4 +1,4 @@
-use arx_engine::{cli_rendering::display_stack, display_board, Game, Position, BOARD_DIMENSION, BOARD_SIZE};
+use arx_engine::{cli_rendering::display_stack, display_board, run_tui, Game, Position, BOARD_DIMENSION, BOARD_SIZE};
 use clap::{Parser, Subcommand, Args};
 use base64::{Engine as _, engine::general_purpose};
 
@@ -12,6 +12,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Play,
+    Tui,
     Export,
     Import(ImportArgs),
     ShowMoves(ShowMovesArgs),
@@ -37,6 +38,11 @@ fn main() {
     match &cli.command {
         Some(Commands::Play) => {
             display_board(game.board());
+        }
+        Some(Commands::Tui) => {
+            if let Err(e) = run_tui(Some(game)) {
+                eprintln!("TUI error: {}", e);
+            }
         }
         Some(Commands::Export) => {
             let all_bytes = game.to_binary();

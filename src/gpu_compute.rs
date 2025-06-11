@@ -1,4 +1,5 @@
-// src/main.rs
+// This example demonstrates how to use WGPU to perform a simple compute operation
+// @todo implement the game logic in a compute shader
 use wgpu::util::DeviceExt;
 
 #[tokio::main]
