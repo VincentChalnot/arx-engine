@@ -1,3 +1,5 @@
+use std::path::Iter;
+
 use crate::board::{Board, Color, Piece, PieceType, Position, BOARD_DIMENSION, BOARD_SIZE};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -189,9 +191,13 @@ impl Game {
 
         match piece_type {
             PieceType::Soldier => self.compute_soldier_moves(position, color, is_top, has_top, &mut moves),
-            PieceType::Jester => self.compute_jester_moves(position, color, is_top, has_top, &mut moves),
-            PieceType::King => self.compute_king_moves(position, color, is_top, has_top, &mut moves),
-            _ => {}
+            PieceType::Jester => self.compute_generic_moves(position, color, is_top, has_top, &mut moves, &Position::DIAGONAL_MOVES, BOARD_DIMENSION as isize),
+            PieceType::Commander => self.compute_generic_moves(position, color, is_top, has_top, &mut moves, &Position::ORTHOGONAL_MOVES, BOARD_DIMENSION as isize),
+            PieceType::Paladin => self.compute_generic_moves(position, color, is_top, has_top, &mut moves, &Position::ORTHOGONAL_MOVES, 2),
+            PieceType::Guard => self.compute_generic_moves(position, color, is_top, has_top, &mut moves, &Position::DIAGONAL_MOVES, 2),
+            PieceType::Dragon => self.compute_dragon_moves(position, color, is_top, has_top, &mut moves),
+            PieceType::Ballista => self.compute_ballista_moves(position, color, is_top, has_top, &mut moves),
+            PieceType::King => self.compute_generic_moves(position, color, is_top, has_top, &mut moves, &Position::ALL_MOVES, 1),
         }
         
         moves
@@ -279,7 +285,7 @@ impl Game {
         }
     }
 
-    fn compute_jester_moves(
+    fn compute_ballista_moves(
         &self,
         position: &Position,
         color: Color,
@@ -287,9 +293,40 @@ impl Game {
         has_top: bool,
         moves: &mut Vec<PotentialMove>,
     ) {
-        // Jester can move diagonally in all four directions
-        for &(dx, dy) in Position::DIAGONAL_MOVES.iter() {
-            for mult in 1..(BOARD_DIMENSION as isize) {
+        // Ballista can move forward any number of steps in a straight line
+        let dy: isize = if color == Color::White { -1 } else { 1 };
+        let directions = [(0 as isize, dy)];
+        self.compute_generic_moves(position, color, is_top, has_top, moves, &directions, BOARD_DIMENSION as isize);
+    }
+
+    fn compute_dragon_moves(
+        &self,
+        position: &Position,
+        color: Color,
+        is_top: bool,
+        has_top: bool,
+        moves: &mut Vec<PotentialMove>,
+    ) {
+        // Dragon move like a knight in chess
+        let directions = [
+            (2, 1), (2, -1), (-2, 1), (-2, -1),
+            (1, 2), (1, -2), (-1, 2), (-1, -2),
+        ];
+        self.compute_generic_moves(position, color, is_top, has_top, moves, &directions, 1);
+    }
+
+    fn compute_generic_moves(
+        &self,
+        position: &Position,
+        color: Color,
+        is_top: bool,
+        has_top: bool,
+        moves: &mut Vec<PotentialMove>,
+        directions: &[(isize, isize)],
+        max_distance: isize,
+    ) {
+        for &(dx, dy) in directions {
+            for mult in 1..max_distance {
                 if let Some(target_position) = position.get_new(dx * mult, dy * mult) {
                     if !self.explore_position(
                         position,
@@ -302,22 +339,6 @@ impl Game {
                         break;
                     }
                 }
-            }
-        }
-    }
-
-    fn compute_king_moves(
-        &self,
-        position: &Position,
-        color: Color,
-        is_top: bool,
-        has_top: bool,
-        moves: &mut Vec<PotentialMove>,
-    ) {
-        // King can move one step in any direction
-        for &(dx, dy) in Position::ORTHOGONAL_MOVES.iter().chain(Position::DIAGONAL_MOVES.iter()) {
-            if let Some(target_position) = position.get_new(dx, dy) {
-                self.explore_position(position, color, &target_position, is_top, has_top, moves);
             }
         }
     }

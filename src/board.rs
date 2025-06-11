@@ -28,6 +28,17 @@ impl Position {
         (-1, 1),  // Down-Left
     ];
 
+    pub const ALL_MOVES: [(isize, isize); 8] = [
+        (1, 0),   // Right
+        (0, 1),   // Down
+        (-1, 0),  // Left
+        (0, -1),  // Up
+        (1, 1),   // Down-Right
+        (1, -1),  // Up-Right
+        (-1, -1), // Up-Left
+        (-1, 1),  // Down-Left
+    ];
+
     pub fn new(x: usize, y: usize) -> Self {
         if x >= BOARD_DIMENSION || y >= BOARD_DIMENSION {
             panic!("Position coordinates must be between 0 and 8 inclusive.");
@@ -76,9 +87,9 @@ pub enum PieceType {
     Soldier = 0b001,   // 1
     Jester = 0b010,    // 2
     Commander = 0b011, // 3
-    Paladins = 0b100,  // 4
-    Guards = 0b101,    // 5
-    Dragons = 0b110,   // 6
+    Paladin = 0b100,  // 4
+    Guard = 0b101,    // 5
+    Dragon = 0b110,   // 6
     Ballista = 0b111,  // 7
     King,              // Handled specially, its discriminant (8) is not used in 3-bit piece codes
 }
@@ -212,9 +223,9 @@ impl Piece {
             0b001 => Some(PieceType::Soldier),
             0b010 => Some(PieceType::Jester),
             0b011 => Some(PieceType::Commander),
-            0b100 => Some(PieceType::Paladins),
-            0b101 => Some(PieceType::Guards),
-            0b110 => Some(PieceType::Dragons),
+            0b100 => Some(PieceType::Paladin),
+            0b101 => Some(PieceType::Guard),
+            0b110 => Some(PieceType::Dragon),
             0b111 => Some(PieceType::Ballista),
             _ => None, // Covers 0b000 and any other invalid 3-bit patterns for non-King pieces
         }
@@ -235,13 +246,13 @@ impl Board {
         const HALF_BOARD_SETUP: [Option<PieceType>; 27] = [
             // Row 0
             Some(PieceType::Ballista),
-            Some(PieceType::Dragons),
-            Some(PieceType::Paladins),
-            Some(PieceType::Guards),
+            Some(PieceType::Dragon),
+            Some(PieceType::Paladin),
+            Some(PieceType::Guard),
             Some(PieceType::King),
-            Some(PieceType::Guards),
-            Some(PieceType::Paladins),
-            Some(PieceType::Dragons),
+            Some(PieceType::Guard),
+            Some(PieceType::Paladin),
+            Some(PieceType::Dragon),
             Some(PieceType::Ballista),
             // Row 1
             None,

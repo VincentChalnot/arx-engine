@@ -61,9 +61,9 @@ fn display_piece(piece_type: &PieceType) -> String {
         PieceType::Soldier => "S".to_string(),
         PieceType::Jester => "J".to_string(),
         PieceType::Commander => "C".to_string(),
-        PieceType::Paladins => "P".to_string(),
-        PieceType::Guards => "G".to_string(),
-        PieceType::Dragons => "D".to_string(),
+        PieceType::Paladin => "P".to_string(),
+        PieceType::Guard => "G".to_string(),
+        PieceType::Dragon => "D".to_string(),
         PieceType::Ballista => "B".to_string(),
         PieceType::King => "K".to_string(),
     }
