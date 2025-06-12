@@ -18,6 +18,7 @@ use std::io;
 pub enum GameState {
     SelectingPiece,
     SelectingTarget { from: Position },
+    GameOver { winner: Color },
 }
 
 pub struct App {
@@ -29,24 +30,46 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        let game = Game::new();
+        let game_state = if game.board.is_game_over() {
+            // Determine winner: if white to move but game is over, black won (and vice versa)
+            let winner = if game.board.is_white_to_move() { Color::Black } else { Color::White };
+            GameState::GameOver { winner }
+        } else {
+            GameState::SelectingPiece
+        };
+        
         App {
-            game: Game::new(),
+            game,
             cursor_position: Position::new(0, 0),
-            game_state: GameState::SelectingPiece,
+            game_state,
             highlighted_moves: Vec::new(),
         }
     }
 
     pub fn from_game(game: Game) -> Self {
+        let game_state = if game.board.is_game_over() {
+            // Determine winner: if white to move but game is over, black won (and vice versa)
+            let winner = if game.board.is_white_to_move() { Color::Black } else { Color::White };
+            GameState::GameOver { winner }
+        } else {
+            GameState::SelectingPiece
+        };
+        
         App {
             game,
             cursor_position: Position::new(0, 0),
-            game_state: GameState::SelectingPiece,
+            game_state,
             highlighted_moves: Vec::new(),
         }
     }
 
     pub fn move_cursor(&mut self, dx: isize, dy: isize) {
+        // Don't allow cursor movement when game is over
+        if matches!(self.game_state, GameState::GameOver { .. }) {
+            return;
+        }
+        
         if let Some(new_pos) = self.cursor_position.get_new(dx, dy) {
             self.cursor_position = new_pos;
             self.update_highlights();
@@ -76,13 +99,24 @@ impl App {
                     let game_move = potential_move.to_move(unstack);
                     self.game.apply_move(game_move)?;
                     
-                    self.game_state = GameState::SelectingPiece;
-                    self.highlighted_moves.clear();
+                    // Check if the game is over after applying the move
+                    if self.game.board.is_game_over() {
+                        // The winner is the player who just moved (current player before turn switch)
+                        let winner = if self.game.board.is_white_to_move() { Color::Black } else { Color::White };
+                        self.game_state = GameState::GameOver { winner };
+                        self.highlighted_moves.clear();
+                    } else {
+                        self.game_state = GameState::SelectingPiece;
+                        self.highlighted_moves.clear();
+                    }
                 } else {
                     // Invalid move, go back to selecting piece
                     self.game_state = GameState::SelectingPiece;
                     self.highlighted_moves.clear();
                 }
+            }
+            GameState::GameOver { .. } => {
+                // Game is over, do nothing
             }
         }
         Ok(())
@@ -97,6 +131,9 @@ impl App {
                 self.game_state = GameState::SelectingPiece;
                 self.highlighted_moves.clear();
             }
+            GameState::GameOver { .. } => {
+                // Game is over, do nothing
+            }
         }
     }
 
@@ -108,6 +145,10 @@ impl App {
             }
             GameState::SelectingTarget { .. } => {
                 // Keep existing highlights
+            }
+            GameState::GameOver { .. } => {
+                // Game is over, clear highlights
+                self.highlighted_moves.clear();
             }
         }
     }
@@ -215,10 +256,17 @@ fn ui(f: &mut Frame, app: &App) {
     let title = match app.game_state {
         GameState::SelectingPiece => {
             format!("{} to move - Select a piece", 
-                if app.game.is_white_to_move() { "White" } else { "Black" })
+                if app.game.board.is_white_to_move() { "White" } else { "Black" })
         }
         GameState::SelectingTarget { .. } => {
             "Select target position".to_string()
+        }
+        GameState::GameOver { winner } => {
+            format!("🎉 GAME OVER - {} WINS! 🎉", 
+                match winner {
+                    Color::White => "WHITE",
+                    Color::Black => "BLACK"
+                })
         }
     };
     
@@ -231,21 +279,36 @@ fn ui(f: &mut Frame, app: &App) {
     render_board(f, app, chunks[1]);
 
     // Instructions
-    let instructions = vec![
-        Line::from(vec![
-            Span::raw("Use "),
-            Span::styled("Arrow Keys", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" to move cursor, "),
-            Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" to select"),
-        ]),
-        Line::from(vec![
-            Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" to cancel selection, "),
-            Span::styled("Q", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(" to quit"),
-        ]),
-    ];
+    let instructions = match app.game_state {
+        GameState::GameOver { .. } => {
+            vec![
+                Line::from(vec![
+                    Span::styled("Game Over!", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" Press "),
+                    Span::styled("Q", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" to quit"),
+                ]),
+                Line::from(""),
+            ]
+        }
+        _ => {
+            vec![
+                Line::from(vec![
+                    Span::raw("Use "),
+                    Span::styled("Arrow Keys", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" to move cursor, "),
+                    Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" to select"),
+                ]),
+                Line::from(vec![
+                    Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" to cancel selection, "),
+                    Span::styled("Q", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" to quit"),
+                ]),
+            ]
+        }
+    };
     
     let instructions_paragraph = Paragraph::new(instructions)
         .block(Block::default().borders(Borders::ALL).title("Controls"))
@@ -254,7 +317,7 @@ fn ui(f: &mut Frame, app: &App) {
 }
 
 fn render_board(f: &mut Frame, app: &App, area: Rect) {
-    let board = app.game.board();
+    let board = app.game.board;
     
     // Calculate the area for the actual board (leaving space for borders and labels)
     let board_area = Rect {
@@ -289,7 +352,8 @@ fn render_board(f: &mut Frame, app: &App, area: Rect) {
         
         let row_num = 9 - y;
         let mut row_spans = vec![
-            Span::styled(format!(" {} ┃", row_num), Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(format!(" {} ", row_num), Style::default().add_modifier(Modifier::BOLD)),
+            Span::raw("┃"),
         ];
         
         for x in 0..BOARD_DIMENSION {
@@ -308,12 +372,12 @@ fn render_board(f: &mut Frame, app: &App, area: Rect) {
                 };
             }
             
-            // Highlight cursor position
-            if position == app.cursor_position {
+            // Highlight cursor position (only if game is not over)
+            if position == app.cursor_position && !matches!(app.game_state, GameState::GameOver { .. }) {
                 cell_style = cell_style.bg(RatatuiColor::Blue);
             }
-            // Highlight possible moves
-            else if app.highlighted_moves.contains(&position) {
+            // Highlight possible moves (only if game is not over)
+            else if app.highlighted_moves.contains(&position) && !matches!(app.game_state, GameState::GameOver { .. }) {
                 cell_style = cell_style.bg(RatatuiColor::Green);
             }
             
@@ -332,10 +396,22 @@ fn render_board(f: &mut Frame, app: &App, area: Rect) {
     let footer = String::from("     A   B   C   D   E   F   G   H   I");
     board_lines.push(Line::from(Span::styled(footer, Style::default().add_modifier(Modifier::BOLD))));
     
-    // Current player indicator
-    let current_player = if app.game.is_white_to_move() { "WHITE" } else { "BLACK" };
+    // Current player indicator or winner message
+    let status_message = match app.game_state {
+        GameState::GameOver { winner } => {
+            format!("            {} WINS THE GAME!", 
+                match winner {
+                    Color::White => "WHITE",
+                    Color::Black => "BLACK"
+                })
+        }
+        _ => {
+            let current_player = if app.game.board.is_white_to_move() { "WHITE" } else { "BLACK" };
+            format!("              {} TO MOVE", current_player)
+        }
+    };
     board_lines.push(Line::from(Span::styled(
-        format!("              {} TO MOVE", current_player),
+        status_message,
         Style::default().add_modifier(Modifier::BOLD)
     )));
     

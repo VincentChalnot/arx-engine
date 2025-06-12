@@ -37,7 +37,7 @@ fn main() {
 
     match &cli.command {
         Some(Commands::Play) => {
-            display_board(game.board());
+            display_board(&game.board);
         }
         Some(Commands::Tui) => {
             if let Err(e) = run_tui(Some(game)) {
@@ -68,7 +68,7 @@ fn main() {
                     
                     match Game::from_binary(board_data) {
                         Ok(imported_game) => {
-                            display_board(imported_game.board());
+                            display_board(&imported_game.board);
                         }
                         Err(e) => {
                             eprintln!("Failed to create game from data: {}", e);
@@ -81,7 +81,7 @@ fn main() {
             }
         }
         Some(Commands::ShowMoves(args)) => {
-            display_board(game.board());
+            display_board(&game.board);
             if let Some(coordinates) = &args.coordinates {
                 let position = parse_position(coordinates).unwrap_or_else(|err| {
                     eprintln!("Error parsing position: {}", err);
@@ -114,7 +114,7 @@ fn main() {
             }
             return;
         }
-        let piece = game.board().get_piece(position);
+        let piece = game.board.get_piece(position);
         let piece_string = if let Some(piece) = piece {
             display_stack(piece)
         } else {

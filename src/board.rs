@@ -236,6 +236,7 @@ impl Piece {
 pub struct Board {
     data: [Option<Piece>; BOARD_SIZE], // each cell is an optional piece
     white_to_move: bool,               // true if it's white's turn to move
+    game_over: bool,              // true if the game is over
 }
 
 impl Board {
@@ -296,6 +297,7 @@ impl Board {
         Board {
             data,
             white_to_move: true,
+            game_over: false,
         }
     }
 
@@ -313,6 +315,14 @@ impl Board {
         } else {
             Color::Black
         }
+    }
+
+    pub fn is_game_over(&self) -> bool {
+        self.game_over
+    }
+
+    pub fn set_game_over(&mut self, game_over: bool) {
+        self.game_over = game_over;
     }
 
     pub fn get_piece(&self, position: &Position) -> Option<&Piece> {
@@ -411,6 +421,7 @@ impl Board {
         Ok(Board {
             data,
             white_to_move: binary[BOARD_SIZE] == 1,
+            game_over: false, // Game over state is not encoded in binary, set to false by default
         })
     }
 }

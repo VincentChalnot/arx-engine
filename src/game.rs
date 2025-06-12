@@ -63,7 +63,7 @@ impl Move {
 
 #[derive(Clone, Debug)]
 pub struct Game {
-    board: Board,
+    pub board: Board,
 }
 
 impl Game {
@@ -75,18 +75,6 @@ impl Game {
 
     pub fn from_board(board: Board) -> Self {
         Game { board }
-    }
-
-    pub fn board(&self) -> &Board {
-        &self.board
-    }
-
-    pub fn is_white_to_move(&self) -> bool {
-        self.board.is_white_to_move()
-    }
-
-    pub fn color_to_move(&self) -> Color {
-        self.board.color_to_move()
     }
 
     pub fn apply_move(&mut self, mv: Move) -> Result<(), String> {
@@ -107,7 +95,7 @@ impl Game {
             return Err("Cannot unstack King".to_string());
         }
 
-        let target_piece: Piece;
+        let source_piece: Piece;
         let mut new_board = self.board.clone();
         if mv.unstack {
             // Unstack the top piece if it exists
@@ -119,28 +107,32 @@ impl Game {
             if let Err(e) = new_piece {
                 return Err(e);
             }
-            target_piece = new_piece.unwrap();
+            source_piece = new_piece.unwrap();
         } else {
-            target_piece = piece.clone();
+            source_piece = piece.clone();
             // Remove the piece from the 'from' position
             new_board.set_piece(&mv.from, None);
         }
 
         // Check what's at the destination position
-        let destination_piece = new_board.get_piece(&mv.to);
+        let destination_piece_opt = new_board.get_piece(&mv.to).cloned();
         
-        if destination_piece.is_none() {
+        if destination_piece_opt.is_none() {
             // Empty square: just place the piece
-            new_board.set_piece(&mv.to, Some(target_piece));
+            new_board.set_piece(&mv.to, Some(source_piece));
         } else {
-            let destination_piece = destination_piece.unwrap();
+            let destination_piece = destination_piece_opt.unwrap();
             
-            if destination_piece.color != target_piece.color {
+            if destination_piece.color != source_piece.color {
                 // Enemy piece: capture it (replace with our piece)
-                new_board.set_piece(&mv.to, Some(target_piece));
+                new_board.set_piece(&mv.to, Some(source_piece));
+                if destination_piece.bottom == PieceType::King {
+                    // If we captured the King, the game is over
+                    new_board.set_game_over(true);
+                }
             } else {
                 // Friendly piece: attempt to stack
-                if let Err(e) = new_board.stack_piece(&mv.to, target_piece) {
+                if let Err(e) = new_board.stack_piece(&mv.to, source_piece) {
                     return Err(format!("Cannot complete move: {}", e));
                 }
             }
@@ -173,7 +165,7 @@ impl Game {
             return moves; // No piece at the position, no moves possible
         }
         let piece = piece.unwrap();
-        if piece.color != self.color_to_move() {
+        if piece.color != self.board.color_to_move() {
             return moves; // Not the player's turn
         }
 
@@ -213,7 +205,7 @@ impl Game {
             PieceType::Guard => self.compute_generic_moves(position, color, is_top, has_top, &mut moves, &Position::DIAGONAL_MOVES, 2),
             PieceType::Dragon => self.compute_dragon_moves(position, color, is_top, has_top, &mut moves),
             PieceType::Ballista => self.compute_ballista_moves(position, color, is_top, has_top, &mut moves),
-            PieceType::King => self.compute_generic_moves(position, color, is_top, has_top, &mut moves, &Position::ALL_MOVES, 1),
+            PieceType::King => self.compute_generic_moves(position, color, false, true, &mut moves, &Position::ALL_MOVES, 1), // King cannot be stacked so we do this trick with is_top and has_top
         }
         
         moves
