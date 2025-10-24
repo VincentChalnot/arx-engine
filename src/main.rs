@@ -12,7 +12,6 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Play,
-    Tui,
     Export,
     Import(ImportArgs),
     ShowMoves(ShowMovesArgs),
@@ -36,14 +35,6 @@ fn main() {
     let game = Game::new();
 
     match &cli.command {
-        Some(Commands::Play) => {
-            display_board(&game.board);
-        }
-        Some(Commands::Tui) => {
-            if let Err(e) = run_tui(Some(game)) {
-                eprintln!("TUI error: {}", e);
-            }
-        }
         Some(Commands::Export) => {
             let all_bytes = game.to_binary();
             let mut byte_vec = Vec::new();
@@ -92,8 +83,10 @@ fn main() {
                 show_all_moves(&game);
             }
         }
-        None => {
-            println!("No command specified. Use --help for usage information.");
+        _ => {
+            if let Err(e) = run_tui(Some(game)) {
+                eprintln!("TUI error: {}", e);
+            }
         }
     }
 

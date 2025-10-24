@@ -18,6 +18,7 @@ use std::io;
 pub enum GameState {
     SelectingPiece,
     SelectingTarget { from: Position },
+    ConfirmUnstack { from: Position, to: Position, unstack: bool },
     GameOver { winner: Color },
 }
 
@@ -31,20 +32,7 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         let game = Game::new();
-        let game_state = if game.board.is_game_over() {
-            // Determine winner: if white to move but game is over, black won (and vice versa)
-            let winner = if game.board.is_white_to_move() { Color::Black } else { Color::White };
-            GameState::GameOver { winner }
-        } else {
-            GameState::SelectingPiece
-        };
-        
-        App {
-            game,
-            cursor_position: Position::new(0, 0),
-            game_state,
-            highlighted_moves: Vec::new(),
-        }
+        App::from_game(game)
     }
 
     pub fn from_game(game: Game) -> Self {
@@ -76,6 +64,20 @@ impl App {
         }
     }
 
+    /// Applies a move, updates game state and highlights, handling game over.
+    fn apply_move_and_update_state(&mut self, game_move: crate::Move) -> Result<(), String> {
+        self.game.apply_move(game_move)?;
+        if self.game.board.is_game_over() {
+            let winner = if self.game.board.is_white_to_move() { Color::Black } else { Color::White };
+            self.game_state = GameState::GameOver { winner };
+            self.highlighted_moves.clear();
+        } else {
+            self.game_state = GameState::SelectingPiece;
+            self.highlighted_moves.clear();
+        }
+        Ok(())
+    }
+
     pub fn handle_enter(&mut self) -> Result<(), String> {
         match self.game_state {
             GameState::SelectingPiece => {
@@ -88,35 +90,55 @@ impl App {
                 }
             }
             GameState::SelectingTarget { from } => {
-                // Check if cursor is on a valid target position
                 let moves = self.game.get_moves(&from);
-                if let Some(potential_move) = moves
-                    .iter()
-                    .find(|m| m.to == self.cursor_position)
-                {
-                    // For now, always choose not to unstack unless forced
+                if let Some(potential_move) = moves.iter().find(|m| m.to == self.cursor_position) {
+                    // If both stack and unstack are possible, show dialog
+                    if potential_move.unstackable && !potential_move.force_unstack {
+                        // Default: full stack
+                        self.game_state = GameState::ConfirmUnstack {
+                            from,
+                            to: self.cursor_position,
+                            unstack: false,
+                        };
+                        // Highlight both options (for UI)
+                        self.highlighted_moves = vec![self.cursor_position];
+                        return Ok(());
+                    }
+                    // If only unstack is allowed, or only stack is allowed, apply directly
                     let unstack = potential_move.force_unstack;
                     let game_move = potential_move.to_move(unstack);
-                    self.game.apply_move(game_move)?;
-                    
-                    // Check if the game is over after applying the move
-                    if self.game.board.is_game_over() {
-                        // The winner is the player who just moved (current player before turn switch)
-                        let winner = if self.game.board.is_white_to_move() { Color::Black } else { Color::White };
-                        self.game_state = GameState::GameOver { winner };
-                        self.highlighted_moves.clear();
-                    } else {
-                        self.game_state = GameState::SelectingPiece;
-                        self.highlighted_moves.clear();
-                    }
+                    return self.apply_move_and_update_state(game_move);
                 } else {
-                    // Invalid move, go back to selecting piece
                     self.game_state = GameState::SelectingPiece;
                     self.highlighted_moves.clear();
                 }
             }
-            GameState::GameOver { .. } => {
-                // Game is over, do nothing
+            GameState::ConfirmUnstack { from, to, unstack } => {
+                // Enter = full stack, 'u' = unstack
+                let moves = self.game.get_moves(&from);
+                if let Some(potential_move) = moves.iter().find(|m| m.to == to) {
+                    let game_move = potential_move.to_move(unstack);
+                    return self.apply_move_and_update_state(game_move);
+                } else {
+                    self.game_state = GameState::SelectingPiece;
+                    self.highlighted_moves.clear();
+                }
+            }
+            GameState::GameOver { .. } => {}
+        }
+        Ok(())
+    }
+
+    pub fn handle_unstack_confirm(&mut self) -> Result<(), String> {
+        // Only valid in ConfirmUnstack state
+        if let GameState::ConfirmUnstack { from, to, .. } = self.game_state {
+            let moves = self.game.get_moves(&from);
+            if let Some(potential_move) = moves.iter().find(|m| m.to == to) {
+                let game_move = potential_move.to_move(true); // unstack
+                return self.apply_move_and_update_state(game_move);
+            } else {
+                self.game_state = GameState::SelectingPiece;
+                self.highlighted_moves.clear();
             }
         }
         Ok(())
@@ -129,6 +151,10 @@ impl App {
             }
             GameState::SelectingTarget { .. } => {
                 self.game_state = GameState::SelectingPiece;
+                self.highlighted_moves.clear();
+            }
+            GameState::ConfirmUnstack { from, .. } => {
+                self.game_state = GameState::SelectingTarget { from };
                 self.highlighted_moves.clear();
             }
             GameState::GameOver { .. } => {
@@ -145,6 +171,10 @@ impl App {
             }
             GameState::SelectingTarget { .. } => {
                 // Keep existing highlights
+            }
+            GameState::ConfirmUnstack { to, .. } => {
+                // Highlight the "confirm" and cancel positions
+                self.highlighted_moves = vec![to];
             }
             GameState::GameOver { .. } => {
                 // Game is over, clear highlights
@@ -228,7 +258,13 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<
                     KeyCode::Enter => {
                         if let Err(_e) = app.handle_enter() {
                             // For now, just ignore move errors
-                            // In a full implementation, you might want to show an error message
+                        }
+                    }
+                    KeyCode::Char('u') => {
+                        if let GameState::ConfirmUnstack { .. } = app.game_state {
+                            if let Err(_e) = app.handle_unstack_confirm() {
+                                // For now, just ignore unstack errors
+                            }
                         }
                     }
                     KeyCode::Up => app.move_cursor(0, -1),
@@ -261,6 +297,9 @@ fn ui(f: &mut Frame, app: &App) {
         GameState::SelectingTarget { .. } => {
             "Select target position".to_string()
         }
+        GameState::ConfirmUnstack { .. } => {
+            "Confirm Unstack/Stack".to_string()
+        }
         GameState::GameOver { winner } => {
             format!("🎉 GAME OVER - {} WINS! 🎉", 
                 match winner {
@@ -288,7 +327,29 @@ fn ui(f: &mut Frame, app: &App) {
                     Span::styled("Q", Style::default().add_modifier(Modifier::BOLD)),
                     Span::raw(" to quit"),
                 ]),
-                Line::from(""),
+                Line::from("")
+            ]
+        }
+        GameState::ConfirmUnstack { .. } => {
+            vec![
+                Line::from(vec![
+                    Span::styled("Stack/Unstack Choice", Style::default().add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(vec![
+                    Span::raw("Press "),
+                    Span::styled("Enter", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" to move the full stack (default)"),
+                ]),
+                Line::from(vec![
+                    Span::raw("Press "),
+                    Span::styled("u", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" to move only the top piece (unstack)"),
+                ]),
+                Line::from(vec![
+                    Span::raw("Press "),
+                    Span::styled("Esc", Style::default().add_modifier(Modifier::BOLD)),
+                    Span::raw(" to cancel"),
+                ]),
             ]
         }
         _ => {

@@ -110,11 +110,16 @@ impl Piece {
     }
 
     pub fn is_stackable(&self) -> bool {
-        if self.bottom == PieceType::King {
-            return false; // King cannot be stacked
-        }
         // A piece is stackable if it has no top piece
-        !self.top.is_some()
+        !self.is_king() && !self.is_stacked()
+    }
+
+    pub fn is_stacked(&self) -> bool {
+        self.top.is_some()
+    }
+
+    pub fn is_king(&self) -> bool {
+        self.bottom == PieceType::King
     }
 
     pub fn to_u8(&self) -> u8 {
@@ -236,7 +241,6 @@ impl Piece {
 pub struct Board {
     data: [Option<Piece>; BOARD_SIZE], // each cell is an optional piece
     white_to_move: bool,               // true if it's white's turn to move
-    game_over: bool,              // true if the game is over
 }
 
 impl Board {
@@ -297,7 +301,6 @@ impl Board {
         Board {
             data,
             white_to_move: true,
-            game_over: false,
         }
     }
 
@@ -318,11 +321,20 @@ impl Board {
     }
 
     pub fn is_game_over(&self) -> bool {
-        self.game_over
-    }
-
-    pub fn set_game_over(&mut self, game_over: bool) {
-        self.game_over = game_over;
+        // Scan the board for both kings
+        let mut king_found = false;
+        for piece_opt in self.data.iter() {
+            if let Some(piece) = piece_opt {
+                if piece.is_king() {
+                    if king_found {
+                        return false; // Both kings found, game is not over
+                    }
+                    king_found = true;
+                }
+            }
+        }
+        // If either king is missing, the game is over
+        true
     }
 
     pub fn get_piece(&self, position: &Position) -> Option<&Piece> {
@@ -421,7 +433,6 @@ impl Board {
         Ok(Board {
             data,
             white_to_move: binary[BOARD_SIZE] == 1,
-            game_over: false, // Game over state is not encoded in binary, set to false by default
         })
     }
 }

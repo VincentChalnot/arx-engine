@@ -126,10 +126,6 @@ impl Game {
             if destination_piece.color != source_piece.color {
                 // Enemy piece: capture it (replace with our piece)
                 new_board.set_piece(&mv.to, Some(source_piece));
-                if destination_piece.bottom == PieceType::King {
-                    // If we captured the King, the game is over
-                    new_board.set_game_over(true);
-                }
             } else {
                 // Friendly piece: attempt to stack
                 if let Err(e) = new_board.stack_piece(&mv.to, source_piece) {
