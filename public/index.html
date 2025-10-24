@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Arx Game</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+  <style>
+    .board {
+      border-collapse: collapse;
+    }
+    .board td {
+      width: 50px;
+      height: 50px;
+      vertical-align: middle;
+      border: 1px solid #ccc;
+      font-weight: bold;
+      font-size: 1.3em;
+      cursor: pointer;
+    }
+    table.board td {
+      text-align: center;
+    }
+    .board tr:nth-child(odd) td:nth-child(even),
+    .board tr:nth-child(even) td:nth-child(odd) {
+      background-color: #f0d9b5;
+    }
+    .board tr:nth-child(even) td:nth-child(even),
+    .board tr:nth-child(odd) td:nth-child(odd) {
+      background-color: #b58863;
+    }
+    .selected {
+      background-color: #6495ED !important; /* Cornflower blue */
+    }
+    .possible-move {
+      background-color: #90EE90 !important; /* Light green */
+    }
+    .white-piece {
+        color: white;
+        text-shadow: -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+    }
+    .black-piece {
+        color: black;
+    }
+  </style>
+</head>
+<body>
+  <section class="section">
+    <div class="container">
+      <h1 class="title">Arx</h1>
+      <div id="board-container"></div>
+      <div id="status"></div>
+    </div>
+  </section>
+
+  <div class="modal" id="unstack-modal">
+    <div class="modal-background"></div>
+    <div class="modal-card">
+      <header class="modal-card-head">
+        <p class="modal-card-title">Choose your move</p>
+      </header>
+      <section class="modal-card-body">
+        <p>You are moving a stacked piece. Do you want to move the full stack or only the top piece?</p>
+      </section>
+      <footer class="modal-card-foot">
+        <button class="button" id="move-stack">Move Full Stack</button>
+        <button class="button" id="move-unstack">Move Top Piece</button>
+      </footer>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
+
