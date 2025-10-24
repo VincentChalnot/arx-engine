@@ -1,5 +1,4 @@
-use arx_engine::engine::{MctsEngine, EngineConfig};
-use arx_engine::{Game, Move};
+use arx_engine::{engine::{MctsEngine, EngineConfig}, Game, Move};
 
 fn main() {
     println!("Arx Engine - MCTS GPU Engine Example");

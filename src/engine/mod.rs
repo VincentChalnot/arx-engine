@@ -73,17 +73,6 @@ impl Default for EngineConfig {
     }
 }
 
-/// MCTS Node (reserved for future full tree implementation)
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-struct MctsNode {
-    board_state: [u8; 82],
-    parent_move: Option<u16>,
-    visits: u32,
-    value: f32,
-    children: Vec<usize>, // Indices into the node pool
-}
-
 /// Monte Carlo Tree Search Engine
 pub struct MctsEngine {
     config: EngineConfig,
