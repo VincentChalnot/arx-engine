@@ -113,9 +113,9 @@ Rust Server Container (port 3000)
 ## Requirements Met
 
 ✅ Public folder served by nginx (static files only)
-✅ Server URL configured via meta tag (read from env variable in setup phase)
-✅ Meta tag injected from environment variable
+✅ Server URL configured via meta tag injection from environment variable
+✅ JavaScript reads configuration in setup phase
 ✅ compose.yaml with nginx and Rust services
-✅ No custom Dockerfile for nginx
+✅ No custom Dockerfile for nginx (uses official nginx:alpine)
 ✅ Rust server in minimal Alpine container
 ✅ Multi-stage build compiling with musl (libc)
