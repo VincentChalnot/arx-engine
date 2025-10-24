@@ -1,0 +1,22 @@
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./public:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/nginx.conf.template:ro
+    environment:
+      - SERVER_URL=${SERVER_URL:-http://server:3000}
+    depends_on:
+      - server
+    command: /bin/sh -c "sed 's|SERVER_URL_PLACEHOLDER|'\"$$SERVER_URL\"'|g' /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && nginx -g 'daemon off;'"
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - RUST_LOG=info

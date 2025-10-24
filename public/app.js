@@ -1,4 +1,10 @@
-const SERVER_URL = 'http://127.0.0.1:3000';
+// Read server URL from meta tag injected by nginx
+let SERVER_URL = 'http://127.0.0.1:3000'; // Default fallback
+const metaServerUrl = document.querySelector('meta[name="server-url"]');
+if (metaServerUrl) {
+    SERVER_URL = metaServerUrl.content;
+}
+
 const boardContainer = document.getElementById('board-container');
 const statusDiv = document.getElementById('status');
 const unstackModal = document.getElementById('unstack-modal');

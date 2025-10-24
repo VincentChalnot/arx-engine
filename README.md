@@ -12,6 +12,8 @@ Arx is played on a 9x9 board. Players control unique pieces, each with specific 
 - Visualize the board with colored pieces and stacks
 
 ## Building and Running
+
+### Native Build
 Ensure you have [Rust](https://www.rust-lang.org/tools/install) installed.
 
 ```sh
@@ -20,7 +22,28 @@ cargo build --release
 
 # Run the game (default: interactive TUI)
 cargo run --release
+
+# Run the web server
+cargo run --release --bin server
 ```
+
+### Docker Compose Setup
+The project includes a Docker Compose configuration for running the web server and nginx frontend.
+
+```sh
+# Start the services (builds on first run)
+docker compose up
+
+# Access the web interface at http://localhost:8080
+# The nginx server will proxy requests to the Rust server
+```
+
+You can configure the server URL by setting the `SERVER_URL` environment variable:
+```sh
+SERVER_URL=http://localhost:3000 docker compose up
+```
+
+Or create a `.env` file (see `.env.example` for reference).
 
 ## Command Line Options
 The CLI supports several subcommands:
