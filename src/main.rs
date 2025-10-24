@@ -1,4 +1,4 @@
-use arx_engine::{cli_rendering::display_stack, display_board, run_tui, Game, Position, BOARD_DIMENSION, BOARD_SIZE};
+use arx_engine::{cli_rendering::display_stack, run_tui, Game, Position, BOARD_DIMENSION, BOARD_SIZE};
 use clap::{Parser, Subcommand, Args};
 use base64::{Engine as _, engine::general_purpose};
 
@@ -11,68 +11,45 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Play,
-    Export,
-    Import(ImportArgs),
+    Play(PlayArgs),
     ShowMoves(ShowMovesArgs),
 }
 
 #[derive(Args)]
-struct ImportArgs {
+struct PlayArgs {
     /// Base64 encoded board data to import
-    data: String,
+    #[arg(long)]
+    board: Option<String>,
 }
 
 #[derive(Args)]
 struct ShowMovesArgs {
-    // Position to show moves for
+    /// Base64 encoded board data to import
+    #[arg(long)]
+    board: Option<String>,
+    /// Position to show moves for
     coordinates: Option<String>,
 }
 
-
 fn main() {
     let cli = Cli::parse();
-    let game = Game::new();
+
+    let board_data = match &cli.command {
+        Some(Commands::Play(args)) => args.board.as_deref(),
+        Some(Commands::ShowMoves(args)) => args.board.as_deref(),
+        None => None,
+    };
+
+    let game = match create_game(board_data) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("Error creating game: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     match &cli.command {
-        Some(Commands::Export) => {
-            let all_bytes = game.to_binary();
-            let mut byte_vec = Vec::new();
-            for byte in all_bytes.iter() {
-                byte_vec.push(*byte);
-            }
-            println!("{}", general_purpose::STANDARD.encode(&byte_vec));
-        }
-        Some(Commands::Import(args)) => {
-            match general_purpose::STANDARD.decode(&args.data) {
-                Ok(bytes) => {
-                    // Convert bytes back to [u8; 81]
-                    if bytes.len() != BOARD_SIZE + 1 {
-                        eprintln!("Invalid data length: expected {} bytes, got {}", BOARD_SIZE + 1, bytes.len());
-                        return;
-                    }
-                    
-                    let mut board_data = [0; BOARD_SIZE + 1];
-                    for (i, &byte) in bytes.iter().enumerate() {
-                        board_data[i] = byte;
-                    }
-                    
-                    match Game::from_binary(board_data) {
-                        Ok(imported_game) => {
-                            display_board(&imported_game.board);
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to create game from data: {}", e);
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Failed to decode base64 data: {}", e);
-                }
-            }
-        }
         Some(Commands::ShowMoves(args)) => {
-            display_board(&game.board);
             if let Some(coordinates) = &args.coordinates {
                 let position = parse_position(coordinates).unwrap_or_else(|err| {
                     eprintln!("Error parsing position: {}", err);
@@ -83,10 +60,16 @@ fn main() {
                 show_all_moves(&game);
             }
         }
-        Some(Commands::Play) | None => {
-            if let Err(e) = run_tui(Some(game)) {
-                eprintln!("TUI error: {}", e);
-            }
+        _ => {
+            match run_tui(Some(game)) {
+                Ok(g) => {
+                    println!("Game hash: {}", get_hash(&g));
+                    println!("(use this to resume the game later on with the --board option)");
+                },
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                }
+            };
         }
     }
 
@@ -142,5 +125,38 @@ fn main() {
         };
         
         Ok(Position { x, y })
+    }
+
+    fn create_game(board_str: Option<&str>) -> Result<Game, String> {
+        match board_str {
+            None => return Ok(Game::new()),
+            Some("") => return Ok(Game::new()),
+            Some(s) => {
+                match general_purpose::STANDARD.decode(s) {
+                    Ok(bytes) => {
+                        // Convert bytes back to [u8; 81]
+                        if bytes.len() != BOARD_SIZE + 1 {
+                            return Err(format!("Invalid data length: expected {} bytes, got {}", BOARD_SIZE + 1, bytes.len()));
+                        }
+
+                        let mut board_data = [0; BOARD_SIZE + 1];
+                        for (i, &byte) in bytes.iter().enumerate() {
+                            board_data[i] = byte;
+                        }
+
+                        Game::from_binary(board_data)
+                    }
+                    Err(e) => {
+                        Err(format!("Failed to decode base64 string: {}", e))
+                    }
+                }
+            }
+        }
+    }
+
+    fn get_hash(game: &Game) -> String {
+        let all_bytes = game.to_binary();
+        let byte_vec = all_bytes.to_vec();
+        general_purpose::STANDARD.encode(&byte_vec)
     }
 }

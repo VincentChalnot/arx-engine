@@ -1,4 +1,4 @@
-use crate::{Color, Game, Piece, PieceType, Position, BOARD_DIMENSION};
+use crate::{Color, Game, Piece, Position, BOARD_DIMENSION, cli_rendering::piece_to_char};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
@@ -187,37 +187,25 @@ impl App {
         let mut output = String::new();
         
         if let Some(ref top_piece) = piece.top {
-            output.push_str(&self.piece_to_char(top_piece));
+            output.push_str(&piece_to_char(top_piece));
             output.push('+');
-            output.push_str(&self.piece_to_char(&piece.bottom));
+            output.push_str(&piece_to_char(&piece.bottom));
         } else {
             output.push_str(" ");
-            output.push_str(&self.piece_to_char(&piece.bottom));
+            output.push_str(&piece_to_char(&piece.bottom));
             output.push_str(" ");
         }
         
         output
     }
-
-    fn piece_to_char(&self, piece_type: &PieceType) -> String {
-        match piece_type {
-            PieceType::Soldier => "S".to_string(),
-            PieceType::Jester => "J".to_string(),
-            PieceType::Commander => "C".to_string(),
-            PieceType::Paladin => "P".to_string(),
-            PieceType::Guard => "G".to_string(),
-            PieceType::Dragon => "D".to_string(),
-            PieceType::Ballista => "B".to_string(),
-            PieceType::King => "K".to_string(),
-        }
-    }
 }
 
-pub fn run_tui(game: Option<Game>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_tui(game: Option<Game>) -> Result<Game, Box<dyn std::error::Error>> {
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -243,7 +231,7 @@ pub fn run_tui(game: Option<Game>) -> Result<(), Box<dyn std::error::Error>> {
         println!("{:?}", err)
     }
 
-    Ok(())
+    Ok(app.game)
 }
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> io::Result<()> {

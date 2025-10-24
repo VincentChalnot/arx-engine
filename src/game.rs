@@ -35,7 +35,7 @@ impl PotentialMove {
         Move {
             from: self.from,
             to: self.to,
-            unstack: unstack,
+            unstack,
         }
     }
 }
@@ -107,7 +107,7 @@ impl Game {
             if let Err(e) = new_piece {
                 return Err(e);
             }
-            source_piece = new_piece.unwrap();
+            source_piece = new_piece?;
         } else {
             source_piece = piece.clone();
             // Remove the piece from the 'from' position
@@ -299,7 +299,7 @@ impl Game {
     ) {
         // Ballista can move forward any number of steps in a straight line
         let dy: isize = if color == Color::White { -1 } else { 1 };
-        let directions = [(0 as isize, dy)];
+        let directions = [(0isize, dy)];
         self.compute_generic_moves(position, color, is_top, has_top, moves, &directions, BOARD_DIMENSION as isize);
     }
 
