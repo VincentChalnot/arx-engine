@@ -83,7 +83,7 @@ fn main() {
                 show_all_moves(&game);
             }
         }
-        _ => {
+        Some(Commands::Play) | None => {
             if let Err(e) = run_tui(Some(game)) {
                 eprintln!("TUI error: {}", e);
             }
