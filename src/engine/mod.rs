@@ -1,3 +1,35 @@
+//! Monte Carlo Tree Search Engine for Arx
+//!
+//! This module provides a GPU-accelerated MCTS engine for evaluating board positions
+//! and finding optimal moves. The engine is completely independent from the main
+//! game logic (board.rs and game.rs) and implements its own simplified move application
+//! and evaluation functions.
+//!
+//! # Features
+//!
+//! - GPU-accelerated move generation via compute shaders
+//! - Configurable search depth and simulation count
+//! - Piece value-based position evaluation
+//! - Adjustable engine strength
+//!
+//! # Example
+//!
+//! ```no_run
+//! use arx_engine::engine::{MctsEngine, EngineConfig};
+//!
+//! // Create engine with custom configuration
+//! let config = EngineConfig {
+//!     max_depth: 3,
+//!     simulations_per_move: 100,
+//!     exploration_constant: 1.414,
+//! };
+//! let mut engine = MctsEngine::with_config(config).expect("Failed to create engine");
+//!
+//! // Find best move for a board position
+//! let board_state = [0u8; 82]; // Your board state
+//! let best_move = engine.find_best_move(&board_state).expect("No legal moves");
+//! ```
+
 use rand::Rng;
 use std::collections::HashMap;
 
@@ -41,7 +73,8 @@ impl Default for EngineConfig {
     }
 }
 
-/// MCTS Node
+/// MCTS Node (reserved for future full tree implementation)
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 struct MctsNode {
     board_state: [u8; 82],
@@ -55,7 +88,6 @@ struct MctsNode {
 pub struct MctsEngine {
     config: EngineConfig,
     move_gen: MoveGenerationEngine,
-    nodes: Vec<MctsNode>,
 }
 
 impl MctsEngine {
@@ -70,7 +102,6 @@ impl MctsEngine {
         Ok(Self {
             config,
             move_gen,
-            nodes: Vec::new(),
         })
     }
 

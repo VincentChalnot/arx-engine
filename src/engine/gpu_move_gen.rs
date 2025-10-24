@@ -1,3 +1,20 @@
+//! GPU-accelerated move generation engine for Arx
+//!
+//! This module provides a WebGPU-based compute shader implementation for generating
+//! all legal moves for a given board position. The shader processes all 81 squares
+//! of the board in parallel, significantly speeding up move generation.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use arx_engine::engine::MoveGenerationEngine;
+//!
+//! let engine = MoveGenerationEngine::new_sync().expect("Failed to create engine");
+//! let board_state = [0u8; 82]; // Your board state
+//! let moves = engine.generate_moves(&board_state).expect("Failed to generate moves");
+//! println!("Found {} legal moves", moves.len());
+//! ```
+
 use bytemuck::{Pod, Zeroable};
 use std::borrow::Cow;
 use wgpu::util::DeviceExt;
