@@ -1,10 +1,10 @@
-const SERVER_URL = 'http://127.0.0.1:3000';
 const boardContainer = document.getElementById('board-container');
 const statusDiv = document.getElementById('status');
 const unstackModal = document.getElementById('unstack-modal');
 const moveStackBtn = document.getElementById('move-stack');
 const moveUnstackBtn = document.getElementById('move-unstack');
 
+let config = null;
 let boardData = null;
 let possibleMoves = [];
 let selectedPiece = null; // { from: int, to: int[] }
@@ -85,7 +85,7 @@ function renderBoard() {
 }
 
 async function getPossibleMoves() {
-    const response = await fetch(`${SERVER_URL}/moves`, {
+    const response = await fetch(`${config.backendUrl}/moves`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/octet-stream' },
         body: boardData,
@@ -145,7 +145,7 @@ async function playMove(from, to, unstack = false) {
     payload.set(new Uint8Array(boardData), 0);
     payload.set(new Uint8Array(moveBuffer), boardData.length);
 
-    const response = await fetch(`${SERVER_URL}/play`, {
+    const response = await fetch(`${config.backendUrl}/play`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/octet-stream' },
         body: payload,
@@ -155,8 +155,7 @@ async function playMove(from, to, unstack = false) {
     boardData = new Uint8Array(newBoardBuffer);
 
     // Update URL
-    const base64Board = btoa(String.fromCharCode.apply(null, boardData));
-    window.location.hash = base64Board;
+    window.location.hash = btoa(String.fromCharCode.apply(null, boardData));
 
     selectedPiece = null;
     selectedMove = null;
@@ -218,6 +217,9 @@ document.querySelector('#unstack-modal .modal-background').addEventListener('cli
 
 
 async function init() {
+    const response = await fetch(`/config.json`);
+    config = await response.json();
+
     if (window.location.hash) {
         try {
             const base64Board = window.location.hash.substring(1);
@@ -230,17 +232,17 @@ async function init() {
             boardData = bytes;
         } catch (e) {
             console.error("Failed to load board from URL, starting new game.", e);
-            const response = await fetch(`${SERVER_URL}/new`);
+            const response = await fetch(`${config.backendUrl}/new`);
             const buffer = await response.arrayBuffer();
             boardData = new Uint8Array(buffer);
         }
     } else {
-        const response = await fetch(`${SERVER_URL}/new`);
+        const response = await fetch(`${config.backendUrl}/new`);
         const buffer = await response.arrayBuffer();
         boardData = new Uint8Array(buffer);
     }
 
-    await getPossibleMoves();
+    await getPossibleMoves(config);
     renderBoard();
 }
 

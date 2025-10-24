@@ -1,0 +1,18 @@
+services:
+  nginx:
+    image: joseluisq/static-web-server:2
+    ports:
+      - "8080:80"
+    volumes:
+      - ./public:/public:ro
+    depends_on:
+      - server
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - RUST_LOG=info
