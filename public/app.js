@@ -11,22 +11,24 @@ let boardData = null;
 let possibleMoves = [];
 let selectedPiece = null; // { from: int, to: int[] }
 let selectedMove = null; // { from: int, to: int }
+let boardCells = null; // Cached board cells
 
 // Get all board cells (td elements) in order
 function getBoardCells() {
-    return Array.from(boardTable.querySelectorAll('tbody td'));
+    if (!boardCells) {
+        boardCells = Array.from(boardTable.querySelectorAll('tbody td'));
+    }
+    return boardCells;
 }
 
 // Get cell at a specific position
 function getCellAtPosition(pos) {
-    const cells = getBoardCells();
-    return cells[pos] || null;
+    return getBoardCells()[pos] || null;
 }
 
 // Get position from a cell element
 function getPositionFromCell(cell) {
-    const cells = getBoardCells();
-    return cells.indexOf(cell);
+    return getBoardCells().indexOf(cell);
 }
 
 const PIECE_CODE = {
