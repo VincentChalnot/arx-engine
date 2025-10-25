@@ -278,13 +278,14 @@ fi
 
 # Deploy with Docker Compose
 print_info "Deploying application..."
-ssh -i "$SSH_KEY" "$SSH_USER@$SSH_HOST" << EOF
+
+# Pull images if not built locally
+if [ "$BUILD_LOCAL" != true ]; then
+    ssh -i "$SSH_KEY" "$SSH_USER@$SSH_HOST" << EOF
 cd $DEPLOY_PATH
 
-# Pull images if not building locally
-if [ "$BUILD_LOCAL" != true ]; then
-    docker compose pull
-fi
+# Pull images
+docker compose pull
 
 # Deploy
 docker compose up -d
@@ -295,6 +296,20 @@ docker compose ps
 # Clean up old images
 docker image prune -af --filter "until=24h" || true
 EOF
+else
+    ssh -i "$SSH_KEY" "$SSH_USER@$SSH_HOST" << EOF
+cd $DEPLOY_PATH
+
+# Deploy (images already loaded)
+docker compose up -d
+
+# Show status
+docker compose ps
+
+# Clean up old images
+docker image prune -af --filter "until=24h" || true
+EOF
+fi
 
 # Verify deployment
 print_info "Verifying deployment..."
