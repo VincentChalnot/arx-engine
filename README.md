@@ -12,6 +12,7 @@ Arx is played on a 9x9 board. Players control unique pieces, each with specific 
 - Visualize the board with colored pieces and stacks
 - Web-based UI with backend API server
 - Docker-based deployment with Traefik integration
+- **GPU-accelerated MCTS engine** for computer opponent (see [Engine Documentation](src/engine/README.md))
 
 ## Building and Running
 Ensure you have [Rust](https://www.rust-lang.org/tools/install) installed.
@@ -44,6 +45,24 @@ cargo run --release -- import "<base64_data>"
 cargo run --release -- show-moves E2
 ```
 
+## MCTS Engine
+
+The project includes a GPU-accelerated Monte Carlo Tree Search engine for computer play:
+
+```sh
+# Run the engine demo
+cargo run --example engine_demo
+```
+
+For more details on using the engine, see the [Engine Documentation](src/engine/README.md).
+
+The engine features:
+- WebGPU compute shader for parallel move generation
+- Configurable search depth and simulation count
+- Piece value-based evaluation
+- Adjustable difficulty levels
+- Independent implementation (doesn't depend on board.rs/game.rs)
+
 ## Documentation
 - [Game Rules](./rules.md): Full rules and piece movements
 - [Piece Encoding](.github/instructions/piece_encoding.instructions.md): Details on board and piece encoding
@@ -72,6 +91,7 @@ For production deployment to remote servers:
 - Automated CI/CD via GitHub Actions
 - Multi-environment support (production, staging, development)
 - Traefik reverse proxy integration with automatic SSL
+- [MCTS Engine](src/engine/README.md): GPU-accelerated engine for computer play
 
 ## License
 This project is licensed under the MIT License.

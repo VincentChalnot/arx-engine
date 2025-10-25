@@ -13,6 +13,10 @@ base64 = "0.22"
 tokio = { version = "1.0", features = ["full"] }
 axum = "0.7"
 tower-http = { version = "0.5", features = ["cors"] }
+wgpu = "23.0"
+pollster = "0.3"
+bytemuck = { version = "1.14", features = ["derive"] }
+rand = "0.8"
 
 [lib]
 name = "arx_engine"

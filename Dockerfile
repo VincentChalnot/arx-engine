@@ -14,13 +14,13 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 
 # Build the server binary
-RUN cargo build --release --bin server
+RUN cargo build --bin server
 
 # Runtime stage
 FROM alpine:latest
 
 # Copy the binary from builder
-COPY --from=builder /app/target/release/server /usr/local/bin/server
+COPY --from=builder /app/target/debug/server /usr/local/bin/server
 
 # Expose the server port
 EXPOSE 3000
