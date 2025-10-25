@@ -1,14 +1,35 @@
 const boardContainer = document.getElementById('board-container');
+const boardTable = document.getElementById('arx-board');
 const statusDiv = document.getElementById('status');
 const unstackModal = document.getElementById('unstack-modal');
 const moveStackBtn = document.getElementById('move-stack');
 const moveUnstackBtn = document.getElementById('move-unstack');
+const switchSidesBtn = document.getElementById('switch-sides');
 
 let config = null;
 let boardData = null;
 let possibleMoves = [];
 let selectedPiece = null; // { from: int, to: int[] }
 let selectedMove = null; // { from: int, to: int }
+let boardCells = null; // Cached board cells
+
+// Get all board cells (td elements) in order
+function getBoardCells() {
+    if (!boardCells) {
+        boardCells = Array.from(boardTable.querySelectorAll('tbody td'));
+    }
+    return boardCells;
+}
+
+// Get cell at a specific position
+function getCellAtPosition(pos) {
+    return getBoardCells()[pos] || null;
+}
+
+// Get position from a cell element
+function getPositionFromCell(cell) {
+    return getBoardCells().indexOf(cell);
+}
 
 const PIECE_CODE = {
     0b001: 'S',
@@ -47,14 +68,19 @@ function decodePiece(piece) {
 function renderBoard() {
     const turn = boardData[81] === 1 ? "White" : "Black";
     statusDiv.innerText = `${turn}'s turn to play.`;
-    // Update each cell in the static table
+    
+    const cells = getBoardCells();
+    
+    // Update each cell
     for (let pos = 0; pos < 81; pos++) {
-        const cell = document.querySelector(`td[data-pos='${pos}']`);
+        const cell = cells[pos];
         if (!cell) continue;
+        
         const pieceVal = boardData[pos];
         const piece = decodePiece(pieceVal);
         cell.innerText = '';
         cell.className = '';
+        
         if (piece) {
             let text = piece.top;
             if (piece.bottom) {
@@ -63,6 +89,7 @@ function renderBoard() {
             cell.innerText = text;
             cell.classList.add(piece.color === 1 ? 'white-piece' : 'black-piece');
         }
+        
         if (selectedPiece && selectedPiece.from === pos) {
             cell.classList.add('selected');
         }
@@ -155,7 +182,8 @@ boardContainer.addEventListener('click', (e) => {
     const cell = e.target.closest('td');
     if (!cell) return;
 
-    const pos = parseInt(cell.dataset.pos, 10);
+    const pos = getPositionFromCell(cell);
+    if (pos === -1) return;
 
     if (selectedPiece) {
         if (selectedPiece.to.includes(pos)) {
@@ -201,6 +229,11 @@ document.querySelector('#unstack-modal .modal-background').addEventListener('cli
     selectedPiece = null;
     selectedMove = null;
     renderBoard();
+});
+
+// Switch sides button
+switchSidesBtn.addEventListener('click', () => {
+    boardTable.classList.toggle('board-reversed');
 });
 
 

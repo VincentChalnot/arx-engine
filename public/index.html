@@ -11,6 +11,7 @@
     }
     .board {
       border-collapse: collapse;
+      position: relative;
     }
     .board td {
       width: 50px;
@@ -46,6 +47,81 @@
     .black-piece {
         color: black;
     }
+
+    /* CSS-based coordinates */
+    .board thead th:nth-child(2)::before { content: 'A'; }
+    .board thead th:nth-child(3)::before { content: 'B'; }
+    .board thead th:nth-child(4)::before { content: 'C'; }
+    .board thead th:nth-child(5)::before { content: 'D'; }
+    .board thead th:nth-child(6)::before { content: 'E'; }
+    .board thead th:nth-child(7)::before { content: 'F'; }
+    .board thead th:nth-child(8)::before { content: 'G'; }
+    .board thead th:nth-child(9)::before { content: 'H'; }
+    .board thead th:nth-child(10)::before { content: 'I'; }
+    
+    .board tfoot th:nth-child(2)::before { content: 'A'; }
+    .board tfoot th:nth-child(3)::before { content: 'B'; }
+    .board tfoot th:nth-child(4)::before { content: 'C'; }
+    .board tfoot th:nth-child(5)::before { content: 'D'; }
+    .board tfoot th:nth-child(6)::before { content: 'E'; }
+    .board tfoot th:nth-child(7)::before { content: 'F'; }
+    .board tfoot th:nth-child(8)::before { content: 'G'; }
+    .board tfoot th:nth-child(9)::before { content: 'H'; }
+    .board tfoot th:nth-child(10)::before { content: 'I'; }
+
+    .board tbody tr:nth-child(1) th::before { content: '9'; }
+    .board tbody tr:nth-child(2) th::before { content: '8'; }
+    .board tbody tr:nth-child(3) th::before { content: '7'; }
+    .board tbody tr:nth-child(4) th::before { content: '6'; }
+    .board tbody tr:nth-child(5) th::before { content: '5'; }
+    .board tbody tr:nth-child(6) th::before { content: '4'; }
+    .board tbody tr:nth-child(7) th::before { content: '3'; }
+    .board tbody tr:nth-child(8) th::before { content: '2'; }
+    .board tbody tr:nth-child(9) th::before { content: '1'; }
+
+    /* Reversed board (180° rotation for local hotseat play) */
+    .board-reversed {
+      transform: rotate(180deg);
+    }
+    .board-reversed td {
+      transform: rotate(180deg);
+    }
+
+    /* Reversed coordinates - swap the numbers */
+    .board-reversed tbody tr:nth-child(1) th::before { content: '1'; }
+    .board-reversed tbody tr:nth-child(2) th::before { content: '2'; }
+    .board-reversed tbody tr:nth-child(3) th::before { content: '3'; }
+    .board-reversed tbody tr:nth-child(4) th::before { content: '4'; }
+    .board-reversed tbody tr:nth-child(5) th::before { content: '5'; }
+    .board-reversed tbody tr:nth-child(6) th::before { content: '6'; }
+    .board-reversed tbody tr:nth-child(7) th::before { content: '7'; }
+    .board-reversed tbody tr:nth-child(8) th::before { content: '8'; }
+    .board-reversed tbody tr:nth-child(9) th::before { content: '9'; }
+
+    /* Reversed coordinates - swap the letters */
+    .board-reversed thead th:nth-child(2)::before { content: 'I'; }
+    .board-reversed thead th:nth-child(3)::before { content: 'H'; }
+    .board-reversed thead th:nth-child(4)::before { content: 'G'; }
+    .board-reversed thead th:nth-child(5)::before { content: 'F'; }
+    .board-reversed thead th:nth-child(6)::before { content: 'E'; }
+    .board-reversed thead th:nth-child(7)::before { content: 'D'; }
+    .board-reversed thead th:nth-child(8)::before { content: 'C'; }
+    .board-reversed thead th:nth-child(9)::before { content: 'B'; }
+    .board-reversed thead th:nth-child(10)::before { content: 'A'; }
+    
+    .board-reversed tfoot th:nth-child(2)::before { content: 'I'; }
+    .board-reversed tfoot th:nth-child(3)::before { content: 'H'; }
+    .board-reversed tfoot th:nth-child(4)::before { content: 'G'; }
+    .board-reversed tfoot th:nth-child(5)::before { content: 'F'; }
+    .board-reversed tfoot th:nth-child(6)::before { content: 'E'; }
+    .board-reversed tfoot th:nth-child(7)::before { content: 'D'; }
+    .board-reversed tfoot th:nth-child(8)::before { content: 'C'; }
+    .board-reversed tfoot th:nth-child(9)::before { content: 'B'; }
+    .board-reversed tfoot th:nth-child(10)::before { content: 'A'; }
+
+    .controls {
+      margin-top: 1rem;
+    }
   </style>
 </head>
 <body>
@@ -57,66 +133,68 @@
           <thead>
             <tr>
               <th></th>
-              <th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th><th>G</th><th>H</th><th>I</th>
+              <th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            <!-- Board rows, 9-1 from top to bottom (notation: 9 at top, 1 at bottom) -->
             <tr>
-              <th>9</th>
-              <td data-pos="0"></td><td data-pos="1"></td><td data-pos="2"></td><td data-pos="3"></td><td data-pos="4"></td><td data-pos="5"></td><td data-pos="6"></td><td data-pos="7"></td><td data-pos="8"></td>
-              <th>9</th>
+              <th></th>
+              <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+              <th></th>
             </tr>
             <tr>
-              <th>8</th>
-              <td data-pos="9"></td><td data-pos="10"></td><td data-pos="11"></td><td data-pos="12"></td><td data-pos="13"></td><td data-pos="14"></td><td data-pos="15"></td><td data-pos="16"></td><td data-pos="17"></td>
-              <th>8</th>
+              <th></th>
+              <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+              <th></th>
             </tr>
             <tr>
-              <th>7</th>
-              <td data-pos="18"></td><td data-pos="19"></td><td data-pos="20"></td><td data-pos="21"></td><td data-pos="22"></td><td data-pos="23"></td><td data-pos="24"></td><td data-pos="25"></td><td data-pos="26"></td>
-              <th>7</th>
+              <th></th>
+              <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+              <th></th>
             </tr>
             <tr>
-              <th>6</th>
-              <td data-pos="27"></td><td data-pos="28"></td><td data-pos="29"></td><td data-pos="30"></td><td data-pos="31"></td><td data-pos="32"></td><td data-pos="33"></td><td data-pos="34"></td><td data-pos="35"></td>
-              <th>6</th>
+              <th></th>
+              <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+              <th></th>
             </tr>
             <tr>
-              <th>5</th>
-              <td data-pos="36"></td><td data-pos="37"></td><td data-pos="38"></td><td data-pos="39"></td><td data-pos="40"></td><td data-pos="41"></td><td data-pos="42"></td><td data-pos="43"></td><td data-pos="44"></td>
-              <th>5</th>
+              <th></th>
+              <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+              <th></th>
             </tr>
             <tr>
-              <th>4</th>
-              <td data-pos="45"></td><td data-pos="46"></td><td data-pos="47"></td><td data-pos="48"></td><td data-pos="49"></td><td data-pos="50"></td><td data-pos="51"></td><td data-pos="52"></td><td data-pos="53"></td>
-              <th>4</th>
+              <th></th>
+              <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+              <th></th>
             </tr>
             <tr>
-              <th>3</th>
-              <td data-pos="54"></td><td data-pos="55"></td><td data-pos="56"></td><td data-pos="57"></td><td data-pos="58"></td><td data-pos="59"></td><td data-pos="60"></td><td data-pos="61"></td><td data-pos="62"></td>
-              <th>3</th>
+              <th></th>
+              <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+              <th></th>
             </tr>
             <tr>
-              <th>2</th>
-              <td data-pos="63"></td><td data-pos="64"></td><td data-pos="65"></td><td data-pos="66"></td><td data-pos="67"></td><td data-pos="68"></td><td data-pos="69"></td><td data-pos="70"></td><td data-pos="71"></td>
-              <th>2</th>
+              <th></th>
+              <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+              <th></th>
             </tr>
             <tr>
-              <th>1</th>
-              <td data-pos="72"></td><td data-pos="73"></td><td data-pos="74"></td><td data-pos="75"></td><td data-pos="76"></td><td data-pos="77"></td><td data-pos="78"></td><td data-pos="79"></td><td data-pos="80"></td>
-              <th>1</th>
+              <th></th>
+              <td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>
+              <th></th>
             </tr>
           </tbody>
           <tfoot>
             <tr>
               <th></th>
-              <th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th><th>G</th><th>H</th><th>I</th>
+              <th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th><th></th>
               <th></th>
             </tr>
           </tfoot>
         </table>
+      </div>
+      <div class="controls">
+        <button class="button is-primary" id="switch-sides">Switch Sides</button>
       </div>
       <div id="status"></div>
     </div>
