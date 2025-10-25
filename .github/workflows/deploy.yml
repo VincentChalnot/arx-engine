@@ -1,0 +1,215 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+
+env:
+  REGISTRY: ghcr.io
+  BACKEND_IMAGE_NAME: ${{ github.repository }}-backend
+  FRONTEND_IMAGE_NAME: ${{ github.repository }}-frontend
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      backend_image: ${{ steps.meta-backend.outputs.tags }}
+      frontend_image: ${{ steps.meta-frontend.outputs.tags }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for backend
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Extract metadata for frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Determine environment for build
+        id: build-env
+        run: |
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "backend_url=${{ vars.PROD_BACKEND_URL || 'https://api.arx.example.com' }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" == "refs/heads/develop" ]; then
+            echo "backend_url=${{ vars.STAGING_BACKEND_URL || 'https://api.staging.arx.example.com' }}" >> $GITHUB_OUTPUT
+          else
+            echo "backend_url=${{ vars.DEV_BACKEND_URL || 'https://api.dev.arx.example.com' }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create config.json for frontend
+        run: |
+          mkdir -p public
+          cat > public/config.json << EOF
+          {
+            "backendUrl": "${{ steps.build-env.outputs.backend_url }}"
+          }
+          EOF
+          cat public/config.json
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.prod
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.frontend
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine environment
+        id: env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" == "refs/heads/develop" ]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+          else
+            echo "environment=development" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set environment variables
+        id: vars
+        run: |
+          ENV="${{ steps.env.outputs.environment }}"
+          echo "Environment: $ENV"
+          
+          # Set variables based on environment
+          if [ "$ENV" == "production" ]; then
+            echo "ssh_host=${{ secrets.PROD_SSH_HOST }}" >> $GITHUB_OUTPUT
+            echo "ssh_user=${{ secrets.PROD_SSH_USER }}" >> $GITHUB_OUTPUT
+            echo "ssh_key=${{ secrets.PROD_SSH_KEY }}" >> $GITHUB_OUTPUT
+            echo "deploy_path=${{ vars.PROD_DEPLOY_PATH || '/opt/arx-engine' }}" >> $GITHUB_OUTPUT
+            echo "frontend_domain=${{ vars.PROD_FRONTEND_DOMAIN }}" >> $GITHUB_OUTPUT
+            echo "backend_domain=${{ vars.PROD_BACKEND_DOMAIN }}" >> $GITHUB_OUTPUT
+            echo "backend_url=${{ vars.PROD_BACKEND_URL }}" >> $GITHUB_OUTPUT
+          elif [ "$ENV" == "staging" ]; then
+            echo "ssh_host=${{ secrets.STAGING_SSH_HOST }}" >> $GITHUB_OUTPUT
+            echo "ssh_user=${{ secrets.STAGING_SSH_USER }}" >> $GITHUB_OUTPUT
+            echo "ssh_key=${{ secrets.STAGING_SSH_KEY }}" >> $GITHUB_OUTPUT
+            echo "deploy_path=${{ vars.STAGING_DEPLOY_PATH || '/opt/arx-engine-staging' }}" >> $GITHUB_OUTPUT
+            echo "frontend_domain=${{ vars.STAGING_FRONTEND_DOMAIN }}" >> $GITHUB_OUTPUT
+            echo "backend_domain=${{ vars.STAGING_BACKEND_DOMAIN }}" >> $GITHUB_OUTPUT
+            echo "backend_url=${{ vars.STAGING_BACKEND_URL }}" >> $GITHUB_OUTPUT
+          else
+            echo "ssh_host=${{ secrets.DEV_SSH_HOST }}" >> $GITHUB_OUTPUT
+            echo "ssh_user=${{ secrets.DEV_SSH_USER }}" >> $GITHUB_OUTPUT
+            echo "ssh_key=${{ secrets.DEV_SSH_KEY }}" >> $GITHUB_OUTPUT
+            echo "deploy_path=${{ vars.DEV_DEPLOY_PATH || '/opt/arx-engine-dev' }}" >> $GITHUB_OUTPUT
+            echo "frontend_domain=${{ vars.DEV_FRONTEND_DOMAIN }}" >> $GITHUB_OUTPUT
+            echo "backend_domain=${{ vars.DEV_BACKEND_DOMAIN }}" >> $GITHUB_OUTPUT
+            echo "backend_url=${{ vars.DEV_BACKEND_URL }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ steps.vars.outputs.ssh_key }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ steps.vars.outputs.ssh_host }} >> ~/.ssh/known_hosts
+
+      - name: Create deployment directory
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ steps.vars.outputs.ssh_user }}@${{ steps.vars.outputs.ssh_host }} \
+            "mkdir -p ${{ steps.vars.outputs.deploy_path }}"
+
+      - name: Create .env file
+        run: |
+          cat > .env.deploy << EOF
+          ENVIRONMENT=${{ steps.env.outputs.environment }}
+          FRONTEND_IMAGE=${{ needs.build-and-push.outputs.frontend_image }}
+          BACKEND_IMAGE=${{ needs.build-and-push.outputs.backend_image }}
+          FRONTEND_DOMAIN=${{ steps.vars.outputs.frontend_domain }}
+          BACKEND_DOMAIN=${{ steps.vars.outputs.backend_domain }}
+          RUST_LOG=${{ vars.RUST_LOG || 'info' }}
+          EOF
+          cat .env.deploy
+
+      - name: Copy files to server
+        run: |
+          scp -i ~/.ssh/deploy_key compose.prod.yaml \
+            ${{ steps.vars.outputs.ssh_user }}@${{ steps.vars.outputs.ssh_host }}:${{ steps.vars.outputs.deploy_path }}/compose.yaml
+          scp -i ~/.ssh/deploy_key .env.deploy \
+            ${{ steps.vars.outputs.ssh_user }}@${{ steps.vars.outputs.ssh_host }}:${{ steps.vars.outputs.deploy_path }}/.env
+
+      - name: Deploy with Docker Compose
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ steps.vars.outputs.ssh_user }}@${{ steps.vars.outputs.ssh_host }} << 'EOF'
+            cd ${{ steps.vars.outputs.deploy_path }}
+            
+            # Pull latest images
+            docker compose pull
+            
+            # Deploy
+            docker compose up -d
+            
+            # Clean up old images
+            docker image prune -af --filter "until=24h"
+          EOF
+
+      - name: Verify deployment
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ steps.vars.outputs.ssh_user }}@${{ steps.vars.outputs.ssh_host }} \
+            "cd ${{ steps.vars.outputs.deploy_path }} && docker compose ps"
