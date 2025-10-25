@@ -47,41 +47,29 @@ function decodePiece(piece) {
 function renderBoard() {
     const turn = boardData[81] === 1 ? "White" : "Black";
     statusDiv.innerText = `${turn}'s turn to play.`;
-    const table = document.createElement('table');
-    table.className = 'board';
-
-    for (let i = 0; i < 9; i++) {
-        const row = document.createElement('tr');
-        for (let j = 0; j < 9; j++) {
-            const cell = document.createElement('td');
-            const pos = i * 9 + j;
-            const pieceVal = boardData[pos];
-            const piece = decodePiece(pieceVal);
-
-            if (piece) {
-                let text = piece.top;
-                if (piece.bottom) {
-                    text += `+${piece.bottom}`;
-                }
-                cell.innerText = text;
-                cell.className = piece.color === 1 ? 'white-piece' : 'black-piece';
+    // Update each cell in the static table
+    for (let pos = 0; pos < 81; pos++) {
+        const cell = document.querySelector(`td[data-pos='${pos}']`);
+        if (!cell) continue;
+        const pieceVal = boardData[pos];
+        const piece = decodePiece(pieceVal);
+        cell.innerText = '';
+        cell.className = '';
+        if (piece) {
+            let text = piece.top;
+            if (piece.bottom) {
+                text += `+${piece.bottom}`;
             }
-
-            cell.dataset.pos = pos;
-
-            if (selectedPiece && selectedPiece.from === pos) {
-                cell.classList.add('selected');
-            }
-            if (selectedPiece && selectedPiece.to.includes(pos)) {
-                cell.classList.add('possible-move');
-            }
-
-            row.appendChild(cell);
+            cell.innerText = text;
+            cell.classList.add(piece.color === 1 ? 'white-piece' : 'black-piece');
         }
-        table.appendChild(row);
+        if (selectedPiece && selectedPiece.from === pos) {
+            cell.classList.add('selected');
+        }
+        if (selectedPiece && selectedPiece.to.includes(pos)) {
+            cell.classList.add('possible-move');
+        }
     }
-    boardContainer.innerHTML = '';
-    boardContainer.appendChild(table);
 }
 
 async function getPossibleMoves() {
@@ -247,4 +235,3 @@ async function init() {
 }
 
 init();
-
