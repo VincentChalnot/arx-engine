@@ -80,8 +80,8 @@ fn is_stackable(piece: u32) -> bool {
     return top_code == 0u; // No top piece means stackable
 }
 
-fn add_move(from: u32, to: u32, unstackable: bool, force_unstack: bool) {
-    var move_encoding: u32 = from | (to << 7u);
+fn add_move(from_idx: u32, to: u32, unstackable: bool, force_unstack: bool) {
+    var move_encoding: u32 = from_idx | (to << 7u);
     if unstackable {
         move_encoding |= (1u << 14u);
     }
@@ -138,12 +138,10 @@ fn explore_position(from_pos: vec2<i32>, from_idx: u32, to_pos: vec2<i32>,
 // Generate moves for soldier
 fn generate_soldier_moves(pos: vec2<i32>, idx: u32, color: u32, is_top: bool, has_top: bool) {
     let dy = select(1, -1, color == 1u);
-    
-    let target1 = vec2<i32>(pos.x + 1, pos.y + dy);
-    explore_position(pos, idx, target1, color, is_top, has_top);
-    
-    let target2 = vec2<i32>(pos.x - 1, pos.y + dy);
-    explore_position(pos, idx, target2, color, is_top, has_top);
+    let target_pos1 = vec2<i32>(pos.x + 1, pos.y + dy);
+    explore_position(pos, idx, target_pos1, color, is_top, has_top);
+    let target_pos2 = vec2<i32>(pos.x - 1, pos.y + dy);
+    explore_position(pos, idx, target_pos2, color, is_top, has_top);
 }
 
 // Generate moves for pieces that move in specific directions with max distance
@@ -152,8 +150,8 @@ fn generate_directional_moves(pos: vec2<i32>, idx: u32, color: u32, is_top: bool
     for (var d = 0u; d < dir_count; d++) {
         let dir = (*directions)[d];
         for (var dist = 1; dist <= max_dist; dist++) {
-            let target = vec2<i32>(pos.x + dir.x * dist, pos.y + dir.y * dist);
-            if !explore_position(pos, idx, target, color, is_top, has_top) {
+            let target_pos = vec2<i32>(pos.x + dir.x * dist, pos.y + dir.y * dist);
+            if !explore_position(pos, idx, target_pos, color, is_top, has_top) {
                 break;
             }
         }
