@@ -3,12 +3,15 @@ const statusDiv = document.getElementById('status');
 const unstackModal = document.getElementById('unstack-modal');
 const moveStackBtn = document.getElementById('move-stack');
 const moveUnstackBtn = document.getElementById('move-unstack');
+const switchSidesBtn = document.getElementById('switch-sides-btn');
 
 let config = null;
 let boardData = null;
 let possibleMoves = [];
 let selectedPiece = null; // { from: int, to: int[] }
 let selectedMove = null; // { from: int, to: int }
+let boardFlipped = false; // Track if the board is flipped
+let boardCells = []; // Store references to board cells
 
 const PIECE_CODE = {
     0b001: 'S',
@@ -19,6 +22,78 @@ const PIECE_CODE = {
     0b110: 'D',
     0b111: 'B',
 };
+
+/**
+ * Creates the board HTML structure dynamically
+ */
+function createBoard() {
+    const columns = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'];
+    const rows = boardFlipped ? [1, 2, 3, 4, 5, 6, 7, 8, 9] : [9, 8, 7, 6, 5, 4, 3, 2, 1];
+    const displayColumns = boardFlipped ? [...columns].reverse() : columns;
+    
+    const table = document.createElement('table');
+    table.className = 'board';
+    table.id = 'arx-board';
+    
+    // Create thead
+    const thead = document.createElement('thead');
+    const headerRow = document.createElement('tr');
+    headerRow.appendChild(document.createElement('th')); // Empty corner
+    displayColumns.forEach(col => {
+        const th = document.createElement('th');
+        th.textContent = col;
+        headerRow.appendChild(th);
+    });
+    headerRow.appendChild(document.createElement('th')); // Empty corner
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+    
+    // Create tbody with cells
+    const tbody = document.createElement('tbody');
+    boardCells = []; // Reset cells array
+    
+    rows.forEach((rowNum, rowIndex) => {
+        const tr = document.createElement('tr');
+        
+        // Row number on the left
+        const leftHeader = document.createElement('th');
+        leftHeader.textContent = rowNum;
+        tr.appendChild(leftHeader);
+        
+        // Create 9 cells for this row
+        for (let colIndex = 0; colIndex < 9; colIndex++) {
+            const td = document.createElement('td');
+            tr.appendChild(td);
+            boardCells.push(td); // Store cell reference
+        }
+        
+        // Row number on the right
+        const rightHeader = document.createElement('th');
+        rightHeader.textContent = rowNum;
+        tr.appendChild(rightHeader);
+        
+        tbody.appendChild(tr);
+    });
+    
+    table.appendChild(tbody);
+    
+    // Create tfoot
+    const tfoot = document.createElement('tfoot');
+    const footerRow = document.createElement('tr');
+    footerRow.appendChild(document.createElement('th')); // Empty corner
+    displayColumns.forEach(col => {
+        const th = document.createElement('th');
+        th.textContent = col;
+        footerRow.appendChild(th);
+    });
+    footerRow.appendChild(document.createElement('th')); // Empty corner
+    tfoot.appendChild(footerRow);
+    table.appendChild(tfoot);
+    
+    // Clear and append to container
+    boardContainer.innerHTML = '';
+    boardContainer.appendChild(table);
+}
 
 function decodePiece(piece) {
     if (piece === 0) return '';
@@ -47,14 +122,19 @@ function decodePiece(piece) {
 function renderBoard() {
     const turn = boardData[81] === 1 ? "White" : "Black";
     statusDiv.innerText = `${turn}'s turn to play.`;
-    // Update each cell in the static table
+    
+    // Update each cell using the stored cell references
     for (let pos = 0; pos < 81; pos++) {
-        const cell = document.querySelector(`td[data-pos='${pos}']`);
+        // Map position based on board orientation
+        const visualIndex = boardFlipped ? (80 - pos) : pos;
+        const cell = boardCells[visualIndex];
         if (!cell) continue;
+        
         const pieceVal = boardData[pos];
         const piece = decodePiece(pieceVal);
         cell.innerText = '';
         cell.className = '';
+        
         if (piece) {
             let text = piece.top;
             if (piece.bottom) {
@@ -63,6 +143,7 @@ function renderBoard() {
             cell.innerText = text;
             cell.classList.add(piece.color === 1 ? 'white-piece' : 'black-piece');
         }
+        
         if (selectedPiece && selectedPiece.from === pos) {
             cell.classList.add('selected');
         }
@@ -154,8 +235,13 @@ async function playMove(from, to, unstack = false) {
 boardContainer.addEventListener('click', (e) => {
     const cell = e.target.closest('td');
     if (!cell) return;
-
-    const pos = parseInt(cell.dataset.pos, 10);
+    
+    // Find the position by finding the cell index in our boardCells array
+    let visualIndex = boardCells.indexOf(cell);
+    if (visualIndex === -1) return;
+    
+    // Map visual index back to actual position based on orientation
+    const pos = boardFlipped ? (80 - visualIndex) : visualIndex;
 
     if (selectedPiece) {
         if (selectedPiece.to.includes(pos)) {
@@ -203,8 +289,24 @@ document.querySelector('#unstack-modal .modal-background').addEventListener('cli
     renderBoard();
 });
 
+// Switch sides button handler
+switchSidesBtn.addEventListener('click', () => {
+    boardFlipped = !boardFlipped;
+    selectedPiece = null;
+    selectedMove = null;
+    createBoard();
+    renderBoard();
+});
+
 
 async function init() {
+    // Show loading message
+    statusDiv.innerText = 'Loading...';
+    
+    // Create the empty board structure first
+    createBoard();
+    
+    // Then fetch config and initialize game
     const response = await fetch(`/config.json`);
     config = await response.json();
 
