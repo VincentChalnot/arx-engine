@@ -20,7 +20,8 @@ impl PotentialMove {
         PotentialMove {
             force_unstack: (v & 0x8000) != 0,
             unstackable: (v & 0x4000) != 0,
-            to: Position::from_u8((v >> 7) as u8),
+            // Mask the shifted value to 7 bits to avoid including the flag bits
+            to: Position::from_u8(((v >> 7) & 0x7F) as u8),
             from: Position::from_u8((v & 0x007F) as u8),
         }
     }
@@ -55,7 +56,8 @@ impl Move {
     pub fn from_u16(v: u16) -> Self {
         Move {
             unstack: (v & 0x4000) != 0,
-            to: Position::from_u8((v >> 7) as u8),
+            // Mask the shifted value to 7 bits to avoid including the flag bits
+            to: Position::from_u8(((v >> 7) & 0x7F) as u8),
             from: Position::from_u8((v & 0x007F) as u8),
         }
     }

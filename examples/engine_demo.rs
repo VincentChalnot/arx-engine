@@ -6,26 +6,17 @@ fn main() {
 
     // Create a new game
     let mut game = Game::new();
-    
-    // Create engine with different difficulty levels
-    println!("Available difficulty levels:");
-    println!("1. Beginner   (depth: 2, simulations: 50, batch: 128)");
-    println!("2. Easy       (depth: 3, simulations: 100, batch: 256)");
-    println!("3. Medium     (depth: 4, simulations: 200, batch: 512)");
-    println!("4. Hard       (depth: 5, simulations: 300, batch: 512)");
-    println!("5. Expert     (depth: 6, simulations: 500, batch: 1024)");
-    println!();
 
     // For this example, we'll use Easy difficulty with GPU acceleration
     let config = EngineConfig {
-        max_depth: 3,
-        simulations_per_move: 100,
+        max_depth: 12,
+        simulations_per_move: 10000,
         exploration_constant: 1.414,
-        gpu_batch_size: 256,
+        gpu_batch_size: 2048,
         use_gpu_simulation: true,
     };
 
-    println!("Creating MCTS engine with Easy difficulty...");
+    println!("Creating MCTS engine with following difficulty...");
     println!("  Max depth: {}", config.max_depth);
     println!("  Simulations per move: {}", config.simulations_per_move);
     println!("  GPU batch size: {}", config.gpu_batch_size);
@@ -43,9 +34,9 @@ fn main() {
         }
     };
 
-    println!("Playing first 3 moves with the engine:\n");
+    println!("Playing first 500 moves with the engine:\n");
 
-    for move_num in 1..=3 {
+    for move_num in 1..=500 {
         // Get current board state
         let board_state = game.to_binary();
         
