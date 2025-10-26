@@ -8,3 +8,4 @@ pub mod engine;
 pub use board::{Board, Color, Piece, PieceType, Position, BOARD_DIMENSION, BOARD_SIZE};
 pub use game::{Game, Move, PotentialMove};
 pub use tui::run_tui;
+pub use engine::{MctsEngine, EngineConfig, SearchStatistics, MoveGenerationEngine, BatchSimulationEngine};
