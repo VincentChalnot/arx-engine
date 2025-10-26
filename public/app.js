@@ -13,6 +13,9 @@ let selectedMove = null; // { from: int, to: int }
 let boardFlipped = false; // Track if the board is flipped
 let boardCells = []; // Store references to board cells
 
+const BOARD_SIZE = 9;
+const LAST_BOARD_INDEX = (BOARD_SIZE * BOARD_SIZE) - 1;
+
 const PIECE_CODE = {
     0b001: 'S',
     0b010: 'J',
@@ -126,7 +129,7 @@ function renderBoard() {
     // Update each cell using the stored cell references
     for (let pos = 0; pos < 81; pos++) {
         // Map position based on board orientation
-        const visualIndex = boardFlipped ? (80 - pos) : pos;
+        const visualIndex = boardFlipped ? (LAST_BOARD_INDEX - pos) : pos;
         const cell = boardCells[visualIndex];
         if (!cell) continue;
         
@@ -241,7 +244,7 @@ boardContainer.addEventListener('click', (e) => {
     if (visualIndex === -1) return;
     
     // Map visual index back to actual position based on orientation
-    const pos = boardFlipped ? (80 - visualIndex) : visualIndex;
+    const pos = boardFlipped ? (LAST_BOARD_INDEX - visualIndex) : visualIndex;
 
     if (selectedPiece) {
         if (selectedPiece.to.includes(pos)) {
