@@ -4,6 +4,9 @@ const unstackModal = document.getElementById('unstack-modal');
 const moveStackBtn = document.getElementById('move-stack');
 const moveUnstackBtn = document.getElementById('move-unstack');
 const switchSidesBtn = document.getElementById('switch-sides-btn');
+const moveHistoryTextarea = document.getElementById('move-history');
+const loadGameBtn = document.getElementById('load-game-btn');
+const undoBtn = document.getElementById('undo-btn');
 
 let config = null;
 let boardData = null;
@@ -13,6 +16,8 @@ let selectedMove = null; // { from: int, to: int }
 let boardFlipped = false; // Track if the board is flipped
 let boardCells = []; // Store references to board cells
 let hoveredPiece = null; // Track currently hovered piece position
+let moveHistory = []; // Array of moves in format "A1-B2"
+let gameHistory = []; // Array of board states (Uint8Array)
 
 const BOARD_SIZE = 9;
 const LAST_BOARD_INDEX = (BOARD_SIZE * BOARD_SIZE) - 1;
@@ -194,6 +199,45 @@ function isStacked(pos) {
     return topCode !== 0;
 }
 
+/**
+ * Convert position index (0-80) to algebraic notation (A1-I9)
+ */
+function posToAlgebraic(pos) {
+    const x = pos % 9;
+    const y = Math.floor(pos / 9);
+    const col = String.fromCharCode('A'.charCodeAt(0) + x);
+    const row = 9 - y;
+    return col + row;
+}
+
+/**
+ * Convert algebraic notation (A1-I9) to position index (0-80)
+ */
+function algebraicToPos(algebraic) {
+    if (!algebraic || algebraic.length < 2) return null;
+    const col = algebraic[0].toUpperCase();
+    const row = parseInt(algebraic.substring(1));
+    if (col < 'A' || col > 'I' || row < 1 || row > 9) return null;
+    const x = col.charCodeAt(0) - 'A'.charCodeAt(0);
+    const y = 9 - row;
+    return y * 9 + x;
+}
+
+/**
+ * Update the move history textarea
+ */
+function updateMoveHistoryDisplay() {
+    let text = '';
+    for (let i = 0; i < moveHistory.length; i += 2) {
+        text += moveHistory[i];
+        if (i + 1 < moveHistory.length) {
+            text += ' ' + moveHistory[i + 1];
+        }
+        text += '\n';
+    }
+    moveHistoryTextarea.value = text;
+}
+
 async function playMove(from, to, unstack = false) {
     // Find the move in possibleMoves
     let moveFound = null;
@@ -232,10 +276,19 @@ async function playMove(from, to, unstack = false) {
     });
 
     const newBoardBuffer = await response.arrayBuffer();
+    
+    // Save current board state to history before updating
+    gameHistory.push(new Uint8Array(boardData));
+    
     boardData = new Uint8Array(newBoardBuffer);
 
     // Update URL
     window.location.hash = btoa(String.fromCharCode.apply(null, boardData));
+
+    // Record move in algebraic notation
+    const moveNotation = posToAlgebraic(from) + '-' + posToAlgebraic(to);
+    moveHistory.push(moveNotation);
+    updateMoveHistoryDisplay();
 
     selectedPiece = null;
     selectedMove = null;
@@ -332,6 +385,95 @@ function addBoardCellHoverListeners() {
     });
 }
 
+// Undo button handler
+undoBtn.addEventListener('click', async () => {
+    if (gameHistory.length === 0) {
+        alert('No moves to undo');
+        return;
+    }
+    
+    // Restore previous board state
+    boardData = gameHistory.pop();
+    
+    // Remove last move from history
+    moveHistory.pop();
+    updateMoveHistoryDisplay();
+    
+    // Update URL
+    window.location.hash = btoa(String.fromCharCode.apply(null, boardData));
+    
+    selectedPiece = null;
+    selectedMove = null;
+    await getPossibleMoves();
+    renderBoard();
+});
+
+// Load game button handler
+loadGameBtn.addEventListener('click', async () => {
+    const text = moveHistoryTextarea.value.trim();
+    if (!text) {
+        alert('Please enter moves to load');
+        return;
+    }
+    
+    // Parse moves from textarea
+    const lines = text.split('\n');
+    const moves = [];
+    for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        for (const part of parts) {
+            if (part.includes('-')) {
+                moves.push(part);
+            }
+        }
+    }
+    
+    if (moves.length === 0) {
+        alert('No valid moves found');
+        return;
+    }
+    
+    // Start a new game
+    const response = await fetch(`${config.backendUrl}/new`);
+    const buffer = await response.arrayBuffer();
+    boardData = new Uint8Array(buffer);
+    moveHistory = [];
+    gameHistory = [];
+    
+    // Apply each move
+    for (const moveNotation of moves) {
+        const parts = moveNotation.split('-');
+        if (parts.length !== 2) {
+            alert(`Invalid move format: ${moveNotation}`);
+            return;
+        }
+        
+        const fromPos = algebraicToPos(parts[0]);
+        const toPos = algebraicToPos(parts[1]);
+        
+        if (fromPos === null || toPos === null) {
+            alert(`Invalid position in move: ${moveNotation}`);
+            return;
+        }
+        
+        // Get possible moves for current board state
+        await getPossibleMoves();
+        
+        // Check if this move is legal
+        const moves = getMovesForPiece(fromPos);
+        if (!moves.includes(toPos)) {
+            alert(`Illegal move: ${moveNotation}`);
+            return;
+        }
+        
+        // Check if piece is stacked - if so, default to moving full stack
+        const stacked = isStacked(fromPos);
+        await playMove(fromPos, toPos, false);
+    }
+    
+    renderBoard();
+});
+
 async function init() {
     // Show loading message
     statusDiv.innerText = 'Loading...';
@@ -354,20 +496,28 @@ async function init() {
                 bytes[i] = binaryString.charCodeAt(i);
             }
             boardData = bytes;
+            // When loading from URL, clear history since we don't know the moves
+            moveHistory = [];
+            gameHistory = [];
         } catch (e) {
             console.error("Failed to load board from URL, starting new game.", e);
             const response = await fetch(`${config.backendUrl}/new`);
             const buffer = await response.arrayBuffer();
             boardData = new Uint8Array(buffer);
+            moveHistory = [];
+            gameHistory = [];
         }
     } else {
         const response = await fetch(`${config.backendUrl}/new`);
         const buffer = await response.arrayBuffer();
         boardData = new Uint8Array(buffer);
+        moveHistory = [];
+        gameHistory = [];
     }
 
     await getPossibleMoves(config);
     renderBoard();
+    updateMoveHistoryDisplay();
 }
 
 init();
