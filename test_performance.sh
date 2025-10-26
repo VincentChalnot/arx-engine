@@ -10,11 +10,27 @@ echo ""
 
 # Check if we have GPU support
 echo "Checking GPU availability..."
-cargo run --example engine_demo 2>&1 | grep -E "(GPU|Failed|✓)" | head -5
+if cargo run --example engine_demo 2>&1 | grep -E "(GPU|Failed|✓)" | head -5; then
+    echo "Example ran successfully"
+else
+    echo "Warning: Example may have encountered issues"
+fi
 
 echo ""
 echo "Running tests..."
-cargo test --release -- --nocapture 2>&1 | grep -E "(test result|running|Skipping)" | head -20
+if cargo test --release -- --nocapture 2>&1 | tee /tmp/test_output.txt | grep -E "(test result|running|Skipping)" | head -20; then
+    echo ""
+    # Check if tests actually passed
+    if grep -q "test result: ok" /tmp/test_output.txt; then
+        echo "✓ All tests passed"
+    else
+        echo "✗ Some tests failed"
+        exit 1
+    fi
+else
+    echo "✗ Test execution failed"
+    exit 1
+fi
 
 echo ""
 echo "======================================"
