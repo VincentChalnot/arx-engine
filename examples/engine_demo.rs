@@ -9,21 +9,28 @@ fn main() {
     
     // Create engine with different difficulty levels
     println!("Available difficulty levels:");
-    println!("1. Beginner   (depth: 2, simulations: 50)");
-    println!("2. Easy       (depth: 3, simulations: 100)");
-    println!("3. Medium     (depth: 4, simulations: 200)");
-    println!("4. Hard       (depth: 5, simulations: 300)");
-    println!("5. Expert     (depth: 6, simulations: 500)");
+    println!("1. Beginner   (depth: 2, simulations: 50, batch: 128)");
+    println!("2. Easy       (depth: 3, simulations: 100, batch: 256)");
+    println!("3. Medium     (depth: 4, simulations: 200, batch: 512)");
+    println!("4. Hard       (depth: 5, simulations: 300, batch: 512)");
+    println!("5. Expert     (depth: 6, simulations: 500, batch: 1024)");
     println!();
 
-    // For this example, we'll use Easy difficulty
+    // For this example, we'll use Easy difficulty with GPU acceleration
     let config = EngineConfig {
         max_depth: 3,
         simulations_per_move: 100,
         exploration_constant: 1.414,
+        gpu_batch_size: 256,
+        use_gpu_simulation: true,
     };
 
     println!("Creating MCTS engine with Easy difficulty...");
+    println!("  Max depth: {}", config.max_depth);
+    println!("  Simulations per move: {}", config.simulations_per_move);
+    println!("  GPU batch size: {}", config.gpu_batch_size);
+    println!("  GPU simulation: {}", config.use_gpu_simulation);
+    
     let mut engine = match MctsEngine::with_config(config) {
         Ok(e) => {
             println!("✓ Engine created successfully\n");
@@ -50,6 +57,8 @@ fn main() {
 
         // Find best move
         println!("Move {}: Thinking...", move_num);
+        let start = std::time::Instant::now();
+        
         let best_move = match engine.find_best_move(&board_state) {
             Ok(m) => m,
             Err(e) => {
@@ -57,7 +66,12 @@ fn main() {
                 break;
             }
         };
+        
+        let elapsed = start.elapsed();
 
+        // Get statistics
+        let stats = engine.get_statistics();
+        
         // Decode and display the move
         let mv = Move::from_u16(best_move);
         let from_str = mv.from.to_string();
@@ -65,6 +79,13 @@ fn main() {
         let unstack_str = if mv.unstack { " (unstack)" } else { "" };
         
         println!("  Best move: {} -> {}{}", from_str, to_str, unstack_str);
+        println!("  Time: {:.3}s", elapsed.as_secs_f64());
+        println!("  Statistics:");
+        println!("    - Total moves evaluated: {}", stats.total_moves_evaluated);
+        println!("    - Simulations run: {}", stats.simulations_run);
+        println!("    - GPU batches processed: {}", stats.gpu_batches_processed);
+        println!("    - CPU simulations: {}", stats.cpu_simulations);
+        println!("    - Avg moves/simulation: {:.2}", stats.avg_moves_per_simulation());
 
         // Apply the move
         match game.apply_move(mv) {
@@ -76,9 +97,22 @@ fn main() {
         }
     }
 
-    println!("Example completed!");
+    // Final statistics
+    let final_stats = engine.get_statistics();
+    println!("═══════════════════════════════════════");
+    println!("Final Statistics:");
+    println!("  Total moves evaluated: {}", final_stats.total_moves_evaluated);
+    println!("  Total simulations run: {}", final_stats.simulations_run);
+    println!("  GPU batches processed: {}", final_stats.gpu_batches_processed);
+    println!("  CPU simulations: {}", final_stats.cpu_simulations);
+    println!("  Average moves per simulation: {:.2}", final_stats.avg_moves_per_simulation());
+    println!("═══════════════════════════════════════");
+
+    println!("\nExample completed!");
     println!("\nConfiguration tips:");
     println!("- Increase max_depth for stronger play (but slower)");
     println!("- Increase simulations_per_move for more accurate evaluation");
-    println!("- Decrease both for faster but weaker play");
+    println!("- Increase gpu_batch_size to process more simulations in parallel");
+    println!("- Set use_gpu_simulation to false to use CPU-only mode");
+    println!("- Decrease all parameters for faster but weaker play");
 }
