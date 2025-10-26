@@ -17,6 +17,7 @@ wgpu = "23.0"
 pollster = "0.3"
 bytemuck = { version = "1.14", features = ["derive"] }
 rand = "0.8"
+rayon = "1.10"
 
 [lib]
 name = "arx_engine"
