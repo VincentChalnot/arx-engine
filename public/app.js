@@ -7,6 +7,7 @@ const switchSidesBtn = document.getElementById('switch-sides-btn');
 const moveHistoryTextarea = document.getElementById('move-history');
 const loadGameBtn = document.getElementById('load-game-btn');
 const undoBtn = document.getElementById('undo-btn');
+const askEngineBtn = document.getElementById('ask-engine-btn');
 
 let config = null;
 let boardData = null;
@@ -276,10 +277,10 @@ async function playMove(from, to, unstack = false) {
     });
 
     const newBoardBuffer = await response.arrayBuffer();
-    
+
     // Save current board state to history before updating
     gameHistory.push(new Uint8Array(boardData));
-    
+
     boardData = new Uint8Array(newBoardBuffer);
 
     // Update URL
@@ -363,6 +364,46 @@ switchSidesBtn.addEventListener('click', () => {
     setTimeout(addBoardCellHoverListeners, 0);
 });
 
+// Ask Engine button handler
+askEngineBtn.addEventListener('click', async () => {
+    try {
+        // Disable button while processing
+        askEngineBtn.disabled = true;
+        askEngineBtn.innerText = 'Thinking...';
+
+        // Request engine move
+        const response = await fetch(`${config.backendUrl}/engine-move`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/octet-stream' },
+            body: boardData,
+        });
+
+        if (!response.ok) {
+            throw new Error(`Server returned ${response.status}`);
+        }
+
+        const moveBuffer = await response.arrayBuffer();
+        const moveArray = new Uint16Array(moveBuffer);
+        const engineMove = moveArray[0];
+
+        // Decode the move
+        const from = engineMove & 0x7F;
+        const to = (engineMove >> 7) & 0x7F;
+        const unstack = (engineMove >> 14) & 0x1;
+
+        // Apply the move
+        await playMove(from, to, unstack === 1);
+
+    } catch (error) {
+        console.error('Error getting engine move:', error);
+        statusDiv.innerText = `Error: ${error.message}. Engine may not be available.`;
+    } finally {
+        // Re-enable button
+        askEngineBtn.disabled = false;
+        askEngineBtn.innerText = 'Ask Engine';
+    }
+});
+
 function addBoardCellHoverListeners() {
     boardCells.forEach((cell, visualIndex) => {
         cell.onmouseenter = () => {
@@ -391,17 +432,17 @@ undoBtn.addEventListener('click', async () => {
         alert('No moves to undo');
         return;
     }
-    
+
     // Restore previous board state
     boardData = gameHistory.pop();
-    
+
     // Remove last move from history
     moveHistory.pop();
     updateMoveHistoryDisplay();
-    
+
     // Update URL
     window.location.hash = btoa(String.fromCharCode.apply(null, boardData));
-    
+
     selectedPiece = null;
     selectedMove = null;
     await getPossibleMoves();
@@ -415,7 +456,7 @@ loadGameBtn.addEventListener('click', async () => {
         alert('Please enter moves to load');
         return;
     }
-    
+
     // Parse moves from textarea
     const lines = text.split('\n');
     const moves = [];
@@ -427,19 +468,19 @@ loadGameBtn.addEventListener('click', async () => {
             }
         }
     }
-    
+
     if (moves.length === 0) {
         alert('No valid moves found');
         return;
     }
-    
+
     // Start a new game
     const response = await fetch(`${config.backendUrl}/new`);
     const buffer = await response.arrayBuffer();
     boardData = new Uint8Array(buffer);
     moveHistory = [];
     gameHistory = [];
-    
+
     // Apply each move
     for (const moveNotation of moves) {
         const parts = moveNotation.split('-');
@@ -447,29 +488,29 @@ loadGameBtn.addEventListener('click', async () => {
             alert(`Invalid move format: ${moveNotation}`);
             return;
         }
-        
+
         const fromPos = algebraicToPos(parts[0]);
         const toPos = algebraicToPos(parts[1]);
-        
+
         if (fromPos === null || toPos === null) {
             alert(`Invalid position in move: ${moveNotation}`);
             return;
         }
-        
+
         // Get possible moves for current board state
         await getPossibleMoves();
-        
+
         // Check if this move is legal
         const moves = getMovesForPiece(fromPos);
         if (!moves.includes(toPos)) {
             alert(`Illegal move: ${moveNotation}`);
             return;
         }
-        
+
         // Always move full stack when loading from history
         await playMove(fromPos, toPos, false);
     }
-    
+
     renderBoard();
 });
 
