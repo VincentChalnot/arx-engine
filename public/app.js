@@ -12,6 +12,7 @@ let selectedPiece = null; // { from: int, to: int[] }
 let selectedMove = null; // { from: int, to: int }
 let boardFlipped = false; // Track if the board is flipped
 let boardCells = []; // Store references to board cells
+let hoveredPiece = null; // Track currently hovered piece position
 
 const BOARD_SIZE = 9;
 const LAST_BOARD_INDEX = (BOARD_SIZE * BOARD_SIZE) - 1;
@@ -152,6 +153,13 @@ function renderBoard() {
         }
         if (selectedPiece && selectedPiece.to.includes(pos)) {
             cell.classList.add('possible-move');
+        }
+        // Highlight hovered possible moves
+        if (hoveredPiece !== null) {
+            const hoveredMoves = getMovesForPiece(hoveredPiece);
+            if (hoveredMoves.includes(pos) && (!selectedPiece || selectedPiece.from !== hoveredPiece)) {
+                cell.classList.add('hovered-move');
+            }
         }
     }
 }
@@ -299,8 +307,30 @@ switchSidesBtn.addEventListener('click', () => {
     selectedMove = null;
     createBoard();
     renderBoard();
+    setTimeout(addBoardCellHoverListeners, 0);
 });
 
+function addBoardCellHoverListeners() {
+    boardCells.forEach((cell, visualIndex) => {
+        cell.onmouseenter = () => {
+            // Map visual index back to actual position
+            const pos = boardFlipped ? (LAST_BOARD_INDEX - visualIndex) : visualIndex;
+            const pieceVal = boardData[pos];
+            const piece = decodePiece(pieceVal);
+            // Only highlight if friendly piece and not currently selected
+            if (piece && piece.color === boardData[81] && (!selectedPiece || selectedPiece.from !== pos)) {
+                hoveredPiece = pos;
+                renderBoard();
+            }
+        };
+        cell.onmouseleave = () => {
+            if (hoveredPiece !== null) {
+                hoveredPiece = null;
+                renderBoard();
+            }
+        };
+    });
+}
 
 async function init() {
     // Show loading message
@@ -308,7 +338,8 @@ async function init() {
     
     // Create the empty board structure first
     createBoard();
-    
+    setTimeout(addBoardCellHoverListeners, 0);
+
     // Then fetch config and initialize game
     const response = await fetch(`/config.json`);
     config = await response.json();
