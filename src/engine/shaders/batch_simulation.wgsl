@@ -67,15 +67,15 @@ fn is_king(piece: u32) -> bool {
 
 // Apply a move to a board state
 fn apply_move(board: ptr<function, BoardState>, move_encoding: u32) -> bool {
-    let from = move_encoding & 0x7Fu;
+    let from_idx = move_encoding & 0x7Fu;
     let to = (move_encoding >> 7u) & 0x7Fu;
     let unstack = (move_encoding & 0x4000u) != 0u;
     
-    if from >= BOARD_SIZE || to >= BOARD_SIZE {
+    if from_idx >= BOARD_SIZE || to >= BOARD_SIZE {
         return false;
     }
     
-    let piece = (*board).squares[from];
+    let piece = (*board).squares[from_idx];
     if piece == 0u {
         return false;
     }
@@ -92,7 +92,7 @@ fn apply_move(board: ptr<function, BoardState>, move_encoding: u32) -> bool {
         }
         
         // Create new bottom piece (remove top)
-        (*board).squares[from] = color_bit | bottom_code;
+        (*board).squares[from_idx] = color_bit | bottom_code;
         
         // Create moving piece (top becomes new bottom)
         let moving_piece = color_bit | top_code;
@@ -101,7 +101,7 @@ fn apply_move(board: ptr<function, BoardState>, move_encoding: u32) -> bool {
         (*board).squares[to] = moving_piece;
     } else {
         // Move entire piece/stack
-        (*board).squares[from] = 0u;
+        (*board).squares[from_idx] = 0u;
         (*board).squares[to] = piece; // Simplified: just capture/replace
     }
     
