@@ -466,8 +466,7 @@ loadGameBtn.addEventListener('click', async () => {
             return;
         }
         
-        // Check if piece is stacked - if so, default to moving full stack
-        const stacked = isStacked(fromPos);
+        // Always move full stack when loading from history
         await playMove(fromPos, toPos, false);
     }
     
