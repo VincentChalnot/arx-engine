@@ -193,6 +193,19 @@ function getMovesForPiece(pos) {
     return moves;
 }
 
+function getPotentialMove(fromPos, toPos) {
+    for (const move of possibleMoves) {
+        const from = move & 0x7F;
+        const to = (move >> 7) & 0x7F;
+        if (from === fromPos && to === toPos) {
+            const unstackable = (move >> 14) & 0x1;
+            const force_unstack = (move >> 15) & 0x1;
+            return { from, to, unstackable: unstackable === 1, force_unstack: force_unstack === 1 };
+        }
+    }
+    return null;
+}
+
 function isStacked(pos) {
     const pieceVal = boardData[pos];
     const payload = pieceVal & 0b0111111;
@@ -291,8 +304,9 @@ boardContainer.addEventListener('click', (e) => {
         if (selectedPiece.to.includes(pos)) {
             // This is a move
             selectedMove = { from: selectedPiece.from, to: pos };
-            if (isStacked(selectedPiece.from)) {
-                // Show modal
+            const potentialMove = getPotentialMove(selectedPiece.from, pos);
+            if (potentialMove && potentialMove.unstackable) {
+                // Show modal only if the move is unstackable
                 unstackModal.classList.add('is-active');
             } else {
                 playMove(selectedMove.from, selectedMove.to, false);
