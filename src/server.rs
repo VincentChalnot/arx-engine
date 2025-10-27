@@ -1,5 +1,5 @@
 use arx_engine::board::{Board, BOARD_SIZE};
-use arx_engine::game::{Game, PotentialMove};
+use arx_engine::game::{Game, Move};
 use arx_engine::engine::{MctsEngine, EngineConfig};
 use axum::{
     http::StatusCode,
@@ -22,7 +22,7 @@ struct AppState {
 async fn main() {
     // Initialize the engine with configuration from engine_demo.rs
     let config = EngineConfig {
-        max_depth: 12,
+        max_depth: 16,
         simulations_per_move: 10000,
         exploration_constant: 1.414,
         gpu_batch_size: 2048,
@@ -98,9 +98,8 @@ async fn play_move(payload: Bytes) -> Result<Vec<u8>, StatusCode> {
     board_array.copy_from_slice(board_bytes);
     let board = Board::from_binary(board_array).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut game = Game::from_board(board);
-    let mv = PotentialMove::from_u16(u16::from_le_bytes([move_bytes[0], move_bytes[1]]));
-    let move_obj = mv.to_move(false);
-    game.apply_move(move_obj).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let mv = Move::from_u16(u16::from_le_bytes([move_bytes[0], move_bytes[1]]));
+    game.apply_move(mv).map_err(|_| StatusCode::BAD_REQUEST)?;
     let new_binary_board = game.to_binary();
     Ok(new_binary_board.to_vec())
 }
