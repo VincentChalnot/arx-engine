@@ -14,6 +14,18 @@
 //! - Piece value-based position evaluation
 //! - Adjustable engine strength
 //! - Statistics tracking (moves evaluated, simulations run)
+//! - Position caching for instant lookup of previously evaluated positions
+//!
+//! # Caching
+//!
+//! The engine maintains an in-memory cache of evaluated board positions. When a position
+//! is evaluated, the best move and its score are stored in RAM. On subsequent calls with
+//! the same position, the engine returns the cached result immediately without re-running
+//! the search algorithm. This significantly improves performance when analyzing positions
+//! that appear multiple times (e.g., transpositions in game trees).
+//!
+//! Cache statistics (hits, misses, hit rate) are tracked and can be accessed via
+//! `get_statistics()`. The cache can be cleared with `clear_cache()` if needed.
 //!
 //! # Example
 //!
@@ -34,11 +46,17 @@
 //! let board_state = [0u8; 82]; // Your board state
 //! let best_move = engine.find_best_move(&board_state).expect("No legal moves");
 //!
-//! // Get search statistics
+//! // Get search statistics including cache performance
 //! let stats = engine.get_statistics();
 //! println!("Moves evaluated: {}", stats.total_moves_evaluated);
 //! println!("Simulations run: {}", stats.simulations_run);
+//! println!("Cache hits: {}", stats.cache_hits);
+//! println!("Cache hit rate: {:.2}%", stats.cache_hit_rate() * 100.0);
+//!
+//! // Clear cache if needed (e.g., when starting a new game)
+//! engine.clear_cache();
 //! ```
+//!
 
 use rand::Rng;
 use rayon::prelude::*;
@@ -151,6 +169,7 @@ impl SearchStatistics {
 
 /// Cached evaluation data for a board position
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // Fields are stored for potential future use (e.g., incremental updates)
 struct CachedEvaluation {
     /// Best move found for this position
     best_move: u16,
@@ -729,5 +748,60 @@ mod tests {
         assert_eq!(stats.cache_hits, 0);
         assert_eq!(stats.cache_misses, 0);
         assert_eq!(stats.cache_hit_rate(), 0.0);
+    }
+
+    #[test]
+    fn test_cache_integration() {
+        let config = EngineConfig {
+            max_depth: 2,
+            simulations_per_move: 10, // Low count for faster testing
+            exploration_constant: 1.414,
+            gpu_batch_size: 64,
+            use_gpu_simulation: false, // Use CPU for consistency
+        };
+        
+        let engine = MctsEngine::with_config(config);
+        if let Err(e) = &engine {
+            println!("Skipping test: GPU not available - {}", e);
+            return;
+        }
+        let mut engine = engine.unwrap();
+        
+        // Create a test board with some pieces
+        let mut board = [0u8; 82];
+        board[81] = 1; // White to move
+        board[40] = 0b1000001; // White Soldier
+        
+        // First call - should be a cache miss
+        let result1 = engine.find_best_move(&board);
+        assert!(result1.is_ok());
+        
+        let stats1 = engine.get_statistics();
+        assert_eq!(stats1.cache_misses, 1);
+        assert_eq!(stats1.cache_hits, 0);
+        assert_eq!(engine.cache_size(), 1);
+        
+        // Second call with same position - should be a cache hit
+        let result2 = engine.find_best_move(&board);
+        assert!(result2.is_ok());
+        
+        let stats2 = engine.get_statistics();
+        assert_eq!(stats2.cache_hits, 1);
+        assert_eq!(stats2.cache_misses, 1);
+        assert_eq!(stats2.cache_hit_rate(), 0.5);
+        
+        // Results should be the same
+        assert_eq!(result1.unwrap(), result2.unwrap());
+        
+        // Clear cache
+        engine.clear_cache();
+        assert_eq!(engine.cache_size(), 0);
+        
+        // Third call after clear - should be a cache miss again
+        let _result3 = engine.find_best_move(&board);
+        let stats3 = engine.get_statistics();
+        assert_eq!(stats3.cache_misses, 2);
+        assert_eq!(stats3.cache_hits, 1);
+        assert_eq!(engine.cache_size(), 1);
     }
 }
