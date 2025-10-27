@@ -56,6 +56,9 @@ pub use gpu_batch_sim::BatchSimulationEngine;
 
 const BOARD_SIZE: usize = 81;
 
+/// King piece encoding payload (C_111000 where C is the color bit)
+const KING_PAYLOAD: u8 = 0x38; // 0b0111000
+
 /// Piece values for evaluation
 const PIECE_VALUES: [i32; 8] = [
     0,  // Index 0: unused
@@ -233,7 +236,7 @@ impl MctsEngine {
             let payload = piece & 0x3F;
 
             // Check for King
-            if payload == 0x38 {
+            if payload == KING_PAYLOAD {
                 if is_white {
                     white_value += KING_VALUE;
                 } else {
@@ -287,9 +290,9 @@ impl MctsEngine {
             return false;
         }
         
-        // Check if target piece is a king (payload == 0x38)
+        // Check if target piece is a king
         let payload = target_piece & 0x3F;
-        payload == 0x38
+        payload == KING_PAYLOAD
     }
 
     /// Check if only two kings remain on the board (draw condition)
@@ -305,7 +308,7 @@ impl MctsEngine {
             
             piece_count += 1;
             let payload = piece & 0x3F;
-            if payload == 0x38 {
+            if payload == KING_PAYLOAD {
                 king_count += 1;
             }
         }
@@ -726,9 +729,9 @@ mod tests {
         let mut board = [0u8; 82];
         board[81] = 1; // White to move
         
-        // Place two kings
-        board[0] = 0b1111000; // White King
-        board[80] = 0b0111000; // Black King
+        // Place two kings (color bit | KING_PAYLOAD)
+        board[0] = (1 << 6) | KING_PAYLOAD; // White King
+        board[80] = (0 << 6) | KING_PAYLOAD; // Black King
         
         assert!(engine.only_two_kings_remain(&board), "Should detect only two kings remain");
         
@@ -759,7 +762,7 @@ mod tests {
         board[0] = 0b1000001; // White Soldier
         
         // Place black king at position 9 (one square away, assuming valid move)
-        board[9] = 0b0111000; // Black King
+        board[9] = (0 << 6) | KING_PAYLOAD; // Black King
         
         // Create a move from position 0 to position 9
         // move_encoding: from=0, to=9, no unstack
