@@ -56,16 +56,19 @@ pub use gpu_batch_sim::BatchSimulationEngine;
 
 const BOARD_SIZE: usize = 81;
 
-/// Piece values for evaluation (based on chess piece values, scaled with Soldier=1)
+/// King piece encoding payload (where C is the color bit: 0bC111000)
+const KING_PAYLOAD: u8 = 0x38; // 0b0111000
+
+/// Piece values for evaluation
 const PIECE_VALUES: [i32; 8] = [
     0,  // Index 0: unused
     1,  // Soldier
-    3,  // Jester (like Bishop)
-    5,  // Commander (like Rook)
-    3,  // Paladin (like Bishop-lite)
-    3,  // Guard (like Bishop-lite)
-    3,  // Dragon (like Knight)
-    5,  // Ballista (like Rook-lite)
+    5,  // Jester
+    5,  // Commander
+    3,  // Paladin
+    3,  // Guard
+    4,  // Dragon
+    4,  // Ballista
 ];
 
 const KING_VALUE: i32 = 1000; // King is invaluable
@@ -214,6 +217,11 @@ impl MctsEngine {
     /// Evaluate a board position and return the value
     /// Positive values favor the current player
     fn evaluate_board(&self, board: &[u8; 82]) -> i32 {
+        // Check for draw condition (only two kings remain)
+        if self.only_two_kings_remain(board) {
+            return 0;
+        }
+        
         let white_to_move = board[81] == 1;
         let mut white_value = 0;
         let mut black_value = 0;
@@ -228,7 +236,7 @@ impl MctsEngine {
             let payload = piece & 0x3F;
 
             // Check for King
-            if payload == 0x38 {
+            if payload == KING_PAYLOAD {
                 if is_white {
                     white_value += KING_VALUE;
                 } else {
@@ -267,6 +275,45 @@ impl MctsEngine {
         } else {
             black_value - white_value
         }
+    }
+
+    /// Check if a move captures the opponent's king
+    fn captures_king(&self, board: &[u8; 82], move_encoding: u16) -> bool {
+        let to = ((move_encoding >> 7) & 0x7F) as usize;
+        
+        if to >= BOARD_SIZE {
+            return false;
+        }
+        
+        let target_piece = board[to];
+        if target_piece == 0 {
+            return false;
+        }
+        
+        // Check if target piece is a king
+        let payload = target_piece & 0x3F;
+        payload == KING_PAYLOAD
+    }
+
+    /// Check if only two kings remain on the board (draw condition)
+    fn only_two_kings_remain(&self, board: &[u8; 82]) -> bool {
+        let mut piece_count = 0;
+        let mut king_count = 0;
+        
+        for i in 0..BOARD_SIZE {
+            let piece = board[i];
+            if piece == 0 {
+                continue;
+            }
+            
+            piece_count += 1;
+            let payload = piece & 0x3F;
+            if payload == KING_PAYLOAD {
+                king_count += 1;
+            }
+        }
+        
+        piece_count == 2 && king_count == 2
     }
 
     /// Apply a move to a board state (simplified version without full game logic)
@@ -359,6 +406,13 @@ impl MctsEngine {
 
         if moves.len() == 1 {
             return Ok(moves[0]);
+        }
+
+        // Check if any move captures the opponent's king - if so, return it immediately
+        for &mv in &moves {
+            if self.captures_king(board, mv) {
+                return Ok(mv);
+            }
         }
 
         // Use GPU batch processing if available
@@ -606,5 +660,124 @@ mod tests {
         engine.reset_statistics();
         let stats = engine.get_statistics();
         assert_eq!(stats.total_moves_evaluated, 0);
+    }
+
+    #[test]
+    fn test_piece_values() {
+        let engine = MctsEngine::new();
+        if let Err(e) = &engine {
+            println!("Skipping test: GPU not available - {}", e);
+            return;
+        }
+        let engine = engine.unwrap();
+        
+        // Test piece values according to specification
+        assert_eq!(PIECE_VALUES[1], 1, "Soldier should be worth 1");
+        assert_eq!(PIECE_VALUES[2], 5, "Jester should be worth 5");
+        assert_eq!(PIECE_VALUES[3], 5, "Commander should be worth 5");
+        assert_eq!(PIECE_VALUES[4], 3, "Paladin should be worth 3");
+        assert_eq!(PIECE_VALUES[5], 3, "Guard should be worth 3");
+        assert_eq!(PIECE_VALUES[6], 4, "Dragon should be worth 4");
+        assert_eq!(PIECE_VALUES[7], 4, "Ballista should be worth 4");
+        assert_eq!(KING_VALUE, 1000, "King should be worth 1000");
+        
+        // Test board evaluation with new values
+        let mut board = [0u8; 82];
+        board[81] = 1; // White to move
+        
+        // White Jester (0b010 = 2)
+        board[0] = 0b1000010; // White (1 << 6) | Jester (0b010)
+        let eval = engine.evaluate_board(&board);
+        assert_eq!(eval, 5, "Board with one white jester should evaluate to 5 for white");
+        
+        // Add Black Dragon (0b110 = 6)
+        board[1] = 0b0000110; // Black (0 << 6) | Dragon (0b110)
+        let eval = engine.evaluate_board(&board);
+        assert_eq!(eval, 1, "Board with white jester (5) and black dragon (4) should evaluate to 1 for white");
+    }
+
+    #[test]
+    fn test_stacked_piece_values() {
+        let engine = MctsEngine::new();
+        if let Err(e) = &engine {
+            println!("Skipping test: GPU not available - {}", e);
+            return;
+        }
+        let engine = engine.unwrap();
+        
+        let mut board = [0u8; 82];
+        board[81] = 1; // White to move
+        
+        // Test stacked piece: Jester on top of Paladin
+        // White (1 << 6) | (Jester << 3) | Paladin
+        // = 0b1000000 | 0b010000 | 0b100
+        // = 0b1010100
+        board[0] = 0b1010100;
+        let eval = engine.evaluate_board(&board);
+        assert_eq!(eval, 8, "Stacked Jester+Paladin should be worth 5+3=8");
+    }
+
+    #[test]
+    fn test_only_two_kings_remain() {
+        let engine = MctsEngine::new();
+        if let Err(e) = &engine {
+            println!("Skipping test: GPU not available - {}", e);
+            return;
+        }
+        let engine = engine.unwrap();
+        
+        let mut board = [0u8; 82];
+        board[81] = 1; // White to move
+        
+        // Place two kings (color bit | KING_PAYLOAD)
+        board[0] = (1 << 6) | KING_PAYLOAD; // White King
+        board[80] = KING_PAYLOAD; // Black King (color bit 0)
+        
+        assert!(engine.only_two_kings_remain(&board), "Should detect only two kings remain");
+        
+        // Evaluation should be 0 (draw)
+        let eval = engine.evaluate_board(&board);
+        assert_eq!(eval, 0, "Board with only two kings should evaluate to 0 (draw)");
+        
+        // Add a soldier - should no longer be a draw
+        board[40] = 0b1000001; // White Soldier
+        assert!(!engine.only_two_kings_remain(&board), "Should not detect two kings when other pieces exist");
+        let eval = engine.evaluate_board(&board);
+        assert_ne!(eval, 0, "Board with kings and soldier should not evaluate to 0");
+    }
+
+    #[test]
+    fn test_captures_king() {
+        let engine = MctsEngine::new();
+        if let Err(e) = &engine {
+            println!("Skipping test: GPU not available - {}", e);
+            return;
+        }
+        let engine = engine.unwrap();
+        
+        let mut board = [0u8; 82];
+        board[81] = 1; // White to move
+        
+        // Place white soldier at position 0
+        board[0] = 0b1000001; // White Soldier
+        
+        // Place black king at position 9 (one square away, assuming valid move)
+        board[9] = KING_PAYLOAD; // Black King (color bit 0)
+        
+        // Create a move from position 0 to position 9
+        // move_encoding: from=0, to=9, no unstack
+        // encoding: (to << 7) | from
+        let move_encoding: u16 = (9 << 7) | 0;
+        
+        assert!(engine.captures_king(&board, move_encoding), "Should detect king capture");
+        
+        // Test non-capturing move
+        board[10] = 0; // Empty square
+        let non_capture_move: u16 = (10 << 7) | 0;
+        assert!(!engine.captures_king(&board, non_capture_move), "Should not detect king capture on empty square");
+        
+        // Test capturing non-king piece
+        board[10] = 0b0000001; // Black Soldier
+        assert!(!engine.captures_king(&board, non_capture_move), "Should not detect king capture when capturing non-king");
     }
 }
