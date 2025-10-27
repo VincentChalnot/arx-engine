@@ -427,7 +427,15 @@ impl MctsEngine {
         }
 
         if moves.len() == 1 {
-            return Ok(moves[0]);
+            // Cache the single move before returning
+            let best_move = moves[0];
+            let mut cache = self.cache.lock().unwrap();
+            cache.insert(*board, CachedEvaluation {
+                best_move,
+                avg_score: 0.0, // No evaluation needed for forced move
+                simulations: 0,
+            });
+            return Ok(best_move);
         }
 
         // Use GPU batch processing if available
