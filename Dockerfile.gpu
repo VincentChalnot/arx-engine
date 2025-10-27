@@ -44,9 +44,8 @@ COPY --from=builder /server /usr/local/bin/server
 # Expose the server port
 EXPOSE 3000
 
-# Add healthcheck
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/ || exit 1
+# No healthcheck needed as curl is not installed
+# Application health can be monitored externally
 
 # Run the server
 CMD ["server"]
