@@ -15,6 +15,7 @@
 //! println!("Found {} legal moves", moves.len());
 //! ```
 
+use super::gpu_context::GpuContext;
 use bytemuck::{Pod, Zeroable};
 use std::borrow::Cow;
 use wgpu::util::DeviceExt;
@@ -49,8 +50,7 @@ unsafe impl Zeroable for GpuMoveBuffer {}
 
 /// GPU-accelerated move generation engine
 pub struct MoveGenerationEngine {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    gpu_context: GpuContext,
     pipeline: wgpu::ComputePipeline,
     bind_group_layout: wgpu::BindGroupLayout,
 }
@@ -58,43 +58,18 @@ pub struct MoveGenerationEngine {
 impl MoveGenerationEngine {
     /// Create a new move generation engine
     pub async fn new() -> Result<Self, String> {
-        // Initialize wgpu
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
-            ..Default::default()
-        });
-
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            })
-            .await
-            .ok_or("Failed to find an appropriate adapter")?;
-
-        let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("Move Generation Device"),
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
-                    memory_hints: Default::default(),
-                },
-                None,
-            )
-            .await
-            .map_err(|e| format!("Failed to create device: {}", e))?;
+        // Use shared GPU context
+        let gpu_context = super::get_shared_context()?;
 
         // Load shader
         let shader_source = include_str!("shaders/move_generation.wgsl");
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let shader = gpu_context.device().create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Move Generation Shader"),
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(shader_source)),
         });
 
         // Create bind group layout
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let bind_group_layout = gpu_context.device().create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Move Generation Bind Group Layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -121,14 +96,14 @@ impl MoveGenerationEngine {
         });
 
         // Create pipeline layout
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let pipeline_layout = gpu_context.device().create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Move Generation Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
         // Create compute pipeline
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        let pipeline = gpu_context.device().create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Move Generation Pipeline"),
             layout: Some(&pipeline_layout),
             module: &shader,
@@ -138,8 +113,7 @@ impl MoveGenerationEngine {
         });
 
         Ok(Self {
-            device,
-            queue,
+            gpu_context,
             pipeline,
             bind_group_layout,
         })
@@ -161,7 +135,7 @@ impl MoveGenerationEngine {
 
         // Create buffers
         let board_buffer = self
-            .device
+            .gpu_context.device()
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Board State Buffer"),
                 contents: bytemuck::cast_slice(&[gpu_board]),
@@ -175,7 +149,7 @@ impl MoveGenerationEngine {
         };
 
         let move_buffer = self
-            .device
+            .gpu_context.device()
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Move Buffer"),
                 contents: bytemuck::cast_slice(&[move_buffer_init]),
@@ -185,7 +159,7 @@ impl MoveGenerationEngine {
             });
 
         // Create staging buffer for reading back results
-        let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+        let staging_buffer = self.gpu_context.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some("Staging Buffer"),
             size: std::mem::size_of::<GpuMoveBuffer>() as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
@@ -193,7 +167,7 @@ impl MoveGenerationEngine {
         });
 
         // Create bind group
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind_group = self.gpu_context.device().create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Move Generation Bind Group"),
             layout: &self.bind_group_layout,
             entries: &[
@@ -210,7 +184,7 @@ impl MoveGenerationEngine {
 
         // Create command encoder
         let mut encoder = self
-            .device
+            .gpu_context.device()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Move Generation Encoder"),
             });
@@ -236,7 +210,7 @@ impl MoveGenerationEngine {
         );
 
         // Submit commands
-        self.queue.submit(Some(encoder.finish()));
+        self.gpu_context.queue().submit(Some(encoder.finish()));
 
         // Read back results
         let buffer_slice = staging_buffer.slice(..);
@@ -245,7 +219,7 @@ impl MoveGenerationEngine {
             sender.send(result).unwrap();
         });
 
-        self.device.poll(wgpu::Maintain::Wait);
+        self.gpu_context.device().poll(wgpu::Maintain::Wait);
         receiver
             .recv()
             .map_err(|e| format!("Failed to receive buffer mapping result: {}", e))?
