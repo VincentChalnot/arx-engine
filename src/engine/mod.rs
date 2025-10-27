@@ -56,7 +56,7 @@ pub use gpu_batch_sim::BatchSimulationEngine;
 
 const BOARD_SIZE: usize = 81;
 
-/// King piece encoding payload (C_111000 where C is the color bit)
+/// King piece encoding payload (where C is the color bit: 0bC111000)
 const KING_PAYLOAD: u8 = 0x38; // 0b0111000
 
 /// Piece values for evaluation
@@ -731,7 +731,7 @@ mod tests {
         
         // Place two kings (color bit | KING_PAYLOAD)
         board[0] = (1 << 6) | KING_PAYLOAD; // White King
-        board[80] = (0 << 6) | KING_PAYLOAD; // Black King
+        board[80] = KING_PAYLOAD; // Black King (color bit 0)
         
         assert!(engine.only_two_kings_remain(&board), "Should detect only two kings remain");
         
@@ -762,7 +762,7 @@ mod tests {
         board[0] = 0b1000001; // White Soldier
         
         // Place black king at position 9 (one square away, assuming valid move)
-        board[9] = (0 << 6) | KING_PAYLOAD; // Black King
+        board[9] = KING_PAYLOAD; // Black King (color bit 0)
         
         // Create a move from position 0 to position 9
         // move_encoding: from=0, to=9, no unstack
