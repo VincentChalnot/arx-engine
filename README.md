@@ -11,6 +11,8 @@ Arx is played on a 9x9 board. Players control unique pieces, each with specific 
 - Display possible moves for any position
 - Visualize the board with colored pieces and stacks
 - **GPU-accelerated MCTS engine** for computer opponent (see [Engine Documentation](src/engine/README.md))
+- Web-based UI with backend API server
+- Docker-based deployment with Traefik integration
 
 ## Building and Running
 
@@ -93,6 +95,31 @@ The engine features:
 - [Game Rules](./rules.md): Full rules and piece movements
 - [Piece Encoding](.github/instructions/piece_encoding.instructions.md): Details on board and piece encoding
 - [MCTS Engine](src/engine/README.md): GPU-accelerated engine for computer play
+- [Quick Start Guide](./QUICKSTART.md): Fast deployment setup guide
+- [Deployment Guide](./DEPLOYMENT.md): Complete deployment documentation
+
+## Web Application
+
+The project includes a web-based interface:
+- Backend API server (Rust/Axum) on port 3000
+- Frontend static web server on port 8080
+
+### Running with Docker Compose
+```sh
+# Start all services
+docker compose up
+
+# Access the web UI at http://localhost:8080
+```
+
+## Deployment
+
+For production deployment to remote servers:
+- See [QUICKSTART.md](./QUICKSTART.md) for rapid setup
+- See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed documentation
+- Automated CI/CD via GitHub Actions
+- Multi-environment support (production, staging, development)
+- Traefik reverse proxy integration with automatic SSL
 
 ## License
 This project is licensed under the MIT License.

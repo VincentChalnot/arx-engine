@@ -21,3 +21,8 @@ target/
 #.idea/
 
 public/config.json
+
+# Environment files
+.env
+.env.*
+!.env.example

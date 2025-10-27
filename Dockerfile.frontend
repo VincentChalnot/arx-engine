@@ -1,0 +1,8 @@
+# Frontend Dockerfile - Static files embedded in container
+FROM joseluisq/static-web-server:2
+
+# Copy all static files into the container
+COPY public /public
+
+# The image already has the correct entrypoint and configuration
+# to serve files from /public on port 80
