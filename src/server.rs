@@ -137,7 +137,10 @@ async fn engine_move(
     // We need to convert to Move format (unstack at bit 14)
     let potential_move = PotentialMove::from_u16(best_move_u16);
 
-    // If force_unstack is set, we must unstack. Otherwise, move the whole stack.
+    // The engine has already evaluated all possible moves, including both unstacking
+    // and non-unstacking options for stacked pieces. When force_unstack is set,
+    // it means the move MUST unstack (e.g., when stacking on a friendly piece).
+    // Otherwise, the engine has chosen to move the whole stack.
     let unstack = potential_move.force_unstack;
     let actual_move = potential_move.to_move(unstack);
 
