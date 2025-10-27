@@ -71,7 +71,7 @@ if [ -f "./target/debug/arx" ] || [ -f "./target/release/arx" ]; then
     echo "Running cargo test to check GPU detection..."
     echo "(This will show GPU initialization logs)"
     echo ""
-    cargo test --lib engine::gpu_context::tests::test_gpu_context_creation -- --nocapture 2>&1 | grep -E "(Initializing|Found|Selected|adapters|GPU|Failed|ERROR)" | head -20
+    cargo test --lib test_gpu_context_creation -- --nocapture 2>&1 | grep -E "(Initializing|Found|Selected|adapters|GPU|Failed|ERROR)" | head -20
 else
     echo "⚠ Arx binary not found. Run 'cargo build' first."
 fi
