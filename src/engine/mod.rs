@@ -431,13 +431,11 @@ impl MctsEngine {
         }
 
         // Use GPU batch processing if available
-        let result = if let Some(ref batch_sim) = self.batch_sim {
+        if let Some(ref batch_sim) = self.batch_sim {
             self.find_best_move_gpu(board, &moves, batch_sim, search_start_moves)
         } else {
             self.find_best_move_cpu(board, &moves, search_start_moves)
-        };
-        
-        result
+        }
     }
 
     /// GPU-accelerated move evaluation with batch processing
