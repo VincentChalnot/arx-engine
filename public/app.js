@@ -132,19 +132,16 @@ function decodePiece(piece) {
 function renderBoard() {
     const turn = boardData[81] === 1 ? "White" : "Black";
     statusDiv.innerText = `${turn}'s turn to play.`;
-    
     // Update each cell using the stored cell references
     for (let pos = 0; pos < 81; pos++) {
         // Map position based on board orientation
         const visualIndex = boardFlipped ? (LAST_BOARD_INDEX - pos) : pos;
         const cell = boardCells[visualIndex];
         if (!cell) continue;
-        
         const pieceVal = boardData[pos];
         const piece = decodePiece(pieceVal);
         cell.innerText = '';
         cell.className = '';
-        
         if (piece) {
             let text = piece.top;
             if (piece.bottom) {
@@ -153,18 +150,31 @@ function renderBoard() {
             cell.innerText = text;
             cell.classList.add(piece.color === 1 ? 'white-piece' : 'black-piece');
         }
-        
+        // Origin cell (selected)
         if (selectedPiece && selectedPiece.from === pos) {
             cell.classList.add('selected');
         }
+        // Possible moves
         if (selectedPiece && selectedPiece.to.includes(pos)) {
-            cell.classList.add('possible-move');
+            // Find the move object for this target
+            const moveObj = getPotentialMove(selectedPiece.from, pos);
+            if (moveObj && moveObj.unstackable) {
+                cell.classList.add('move-unstackable');
+            } else {
+                cell.classList.add('move-basic');
+            }
         }
         // Highlight hovered possible moves
         if (hoveredPiece !== null) {
             const hoveredMoves = getMovesForPiece(hoveredPiece);
             if (hoveredMoves.includes(pos) && (!selectedPiece || selectedPiece.from !== hoveredPiece)) {
-                cell.classList.add('hovered-move');
+                // Find the move object for this hovered move
+                const moveObj = getPotentialMove(hoveredPiece, pos);
+                if (moveObj && moveObj.unstackable) {
+                    cell.classList.add('hovered-unstackable');
+                } else {
+                    cell.classList.add('hovered-basic');
+                }
             }
         }
     }
@@ -554,3 +564,7 @@ async function init() {
 }
 
 init();
+
+window.addEventListener('hashchange', () => {
+    init();
+});
