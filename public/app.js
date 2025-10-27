@@ -564,3 +564,7 @@ async function init() {
 }
 
 init();
+
+window.addEventListener('hashchange', () => {
+    init();
+});
