@@ -118,13 +118,13 @@ impl Game {
 
         // Check what's at the destination position
         let destination_piece_opt = new_board.get_piece(&mv.to).cloned();
-        
+
         if destination_piece_opt.is_none() {
             // Empty square: just place the piece
             new_board.set_piece(&mv.to, Some(source_piece));
         } else {
             let destination_piece = destination_piece_opt.unwrap();
-            
+
             if destination_piece.color != source_piece.color {
                 // Enemy piece: capture it (replace with our piece)
                 new_board.set_piece(&mv.to, Some(source_piece));
@@ -135,7 +135,7 @@ impl Game {
                 }
             }
         }
-        
+
         new_board.set_white_to_move(!new_board.is_white_to_move()); // Switch turn
 
         Ok(new_board)
@@ -196,16 +196,62 @@ impl Game {
         let mut moves = Vec::new();
 
         match piece_type {
-            PieceType::Soldier => self.compute_soldier_moves(position, color, is_top, has_top, &mut moves),
-            PieceType::Jester => self.compute_generic_moves(position, color, is_top, has_top, &mut moves, &Position::DIAGONAL_MOVES, BOARD_DIMENSION as isize),
-            PieceType::Commander => self.compute_generic_moves(position, color, is_top, has_top, &mut moves, &Position::ORTHOGONAL_MOVES, BOARD_DIMENSION as isize),
-            PieceType::Paladin => self.compute_generic_moves(position, color, is_top, has_top, &mut moves, &Position::ORTHOGONAL_MOVES, 2),
-            PieceType::Guard => self.compute_generic_moves(position, color, is_top, has_top, &mut moves, &Position::DIAGONAL_MOVES, 2),
-            PieceType::Dragon => self.compute_dragon_moves(position, color, is_top, has_top, &mut moves),
-            PieceType::Ballista => self.compute_ballista_moves(position, color, is_top, has_top, &mut moves),
-            PieceType::King => self.compute_generic_moves(position, color, false, true, &mut moves, &Position::ALL_MOVES, 1), // King cannot be stacked so we do this trick with is_top and has_top
+            PieceType::Soldier => {
+                self.compute_soldier_moves(position, color, is_top, has_top, &mut moves)
+            }
+            PieceType::Jester => self.compute_generic_moves(
+                position,
+                color,
+                is_top,
+                has_top,
+                &mut moves,
+                &Position::DIAGONAL_MOVES,
+                BOARD_DIMENSION as isize,
+            ),
+            PieceType::Commander => self.compute_generic_moves(
+                position,
+                color,
+                is_top,
+                has_top,
+                &mut moves,
+                &Position::ORTHOGONAL_MOVES,
+                BOARD_DIMENSION as isize,
+            ),
+            PieceType::Paladin => self.compute_generic_moves(
+                position,
+                color,
+                is_top,
+                has_top,
+                &mut moves,
+                &Position::ORTHOGONAL_MOVES,
+                2,
+            ),
+            PieceType::Guard => self.compute_generic_moves(
+                position,
+                color,
+                is_top,
+                has_top,
+                &mut moves,
+                &Position::DIAGONAL_MOVES,
+                2,
+            ),
+            PieceType::Dragon => {
+                self.compute_dragon_moves(position, color, is_top, has_top, &mut moves)
+            }
+            PieceType::Ballista => {
+                self.compute_ballista_moves(position, color, is_top, has_top, &mut moves)
+            }
+            PieceType::King => self.compute_generic_moves(
+                position,
+                color,
+                false,
+                true,
+                &mut moves,
+                &Position::ALL_MOVES,
+                1,
+            ), // King cannot be stacked so we do this trick with is_top and has_top
         }
-        
+
         moves
     }
 
@@ -302,7 +348,15 @@ impl Game {
         // Ballista can move forward any number of steps in a straight line
         let dy: isize = if color == Color::White { -1 } else { 1 };
         let directions = [(0isize, dy)];
-        self.compute_generic_moves(position, color, is_top, has_top, moves, &directions, BOARD_DIMENSION as isize);
+        self.compute_generic_moves(
+            position,
+            color,
+            is_top,
+            has_top,
+            moves,
+            &directions,
+            BOARD_DIMENSION as isize,
+        );
     }
 
     fn compute_dragon_moves(
@@ -315,8 +369,14 @@ impl Game {
     ) {
         // Dragon move like a knight in chess
         let directions = [
-            (2, 1), (2, -1), (-2, 1), (-2, -1),
-            (1, 2), (1, -2), (-1, 2), (-1, -2),
+            (2, 1),
+            (2, -1),
+            (-2, 1),
+            (-2, -1),
+            (1, 2),
+            (1, -2),
+            (-1, 2),
+            (-1, -2),
         ];
         self.compute_generic_moves(position, color, is_top, has_top, moves, &directions, 1);
     }

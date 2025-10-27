@@ -1,13 +1,13 @@
 use arx_engine::board::{Board, BOARD_SIZE};
-use arx_engine::game::{Game, Move};
-use arx_engine::engine::{MctsEngine, EngineConfig};
+use arx_engine::engine::{EngineConfig, MctsEngine};
+use arx_engine::game::{Game, Move, PotentialMove};
 use axum::{
+    body::Bytes,
+    extract::State,
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
     Router,
-    body::Bytes,
-    extract::State,
 };
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -104,7 +104,10 @@ async fn play_move(payload: Bytes) -> Result<Vec<u8>, StatusCode> {
     Ok(new_binary_board.to_vec())
 }
 
-async fn engine_move(State(state): State<Arc<AppState>>, payload: Bytes) -> Result<Vec<u8>, StatusCode> {
+async fn engine_move(
+    State(state): State<Arc<AppState>>,
+    payload: Bytes,
+) -> Result<Vec<u8>, StatusCode> {
     let board_bytes = payload;
     if board_bytes.len() != BOARD_SIZE + 1 {
         return Err(StatusCode::BAD_REQUEST);
@@ -114,17 +117,88 @@ async fn engine_move(State(state): State<Arc<AppState>>, payload: Bytes) -> Resu
     board_array.copy_from_slice(&board_bytes);
 
     // Get the engine from state
-    let mut engine_guard = state.engine.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    
-    let engine = engine_guard.as_mut().ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    let mut engine_guard = state
+        .engine
+        .lock()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let engine = engine_guard
+        .as_mut()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
     // Find best move using the engine
-    let best_move = engine.find_best_move(&board_array)
-        .map_err(|e| {
-            eprintln!("Engine error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    let best_move_u16 = engine.find_best_move(&board_array).map_err(|e| {
+        eprintln!("Engine error: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
-    // Return the move as 2-byte little-endian u16
-    Ok(best_move.to_le_bytes().to_vec())
+    // Convert PotentialMove encoding to Move encoding
+    // The engine returns moves in PotentialMove format (with force_unstack at bit 15)
+    // We need to convert to Move format (unstack at bit 14)
+    let potential_move = PotentialMove::from_u16(best_move_u16);
+
+    // If force_unstack is set, we must unstack. Otherwise, move the whole stack.
+    let unstack = potential_move.force_unstack;
+    let actual_move = potential_move.to_move(unstack);
+
+    // Return the move as 2-byte little-endian u16 in Move format
+    Ok(actual_move.to_u16().to_le_bytes().to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_potential_move_to_move_conversion() {
+        // Test case 1: Simple move without unstack flags
+        // From position 0, to position 9, no flags
+        let from = 0u16;
+        let to = 9u16;
+        let potential_move_u16 = from | (to << 7); // Basic encoding: from | (to << 7)
+        let potential_move = PotentialMove::from_u16(potential_move_u16);
+        let actual_move = potential_move.to_move(false);
+        let move_u16 = actual_move.to_u16();
+
+        // Move format should have same from/to but unstack at bit 14
+        assert_eq!(move_u16 & 0x7F, 0, "From position should be 0");
+        assert_eq!((move_u16 >> 7) & 0x7F, 9, "To position should be 9");
+        assert_eq!((move_u16 >> 14) & 0x1, 0, "Unstack should be false");
+
+        // Test case 2: Move with force_unstack flag set (must also have unstackable)
+        // From position 40, to position 41, unstackable=true, force_unstack=true
+        let from = 40u16;
+        let to = 41u16;
+        let potential_move_u16 = from | (to << 7) | (1 << 14) | (1 << 15); // both unstackable and force_unstack
+        let potential_move = PotentialMove::from_u16(potential_move_u16);
+        assert!(potential_move.unstackable, "unstackable should be true");
+        assert!(potential_move.force_unstack, "force_unstack should be true");
+
+        let actual_move = potential_move.to_move(true);
+        let move_u16 = actual_move.to_u16();
+
+        assert_eq!(move_u16 & 0x7F, 40, "From position should be 40");
+        assert_eq!((move_u16 >> 7) & 0x7F, 41, "To position should be 41");
+        assert_eq!((move_u16 >> 14) & 0x1, 1, "Unstack should be true");
+
+        // Test case 3: Move with unstackable flag but not force_unstack
+        // From position 10, to position 20, unstackable=true, force_unstack=false
+        let from = 10u16;
+        let to = 20u16;
+        let potential_move_u16 = from | (to << 7) | (1 << 14); // unstackable at bit 14
+        let potential_move = PotentialMove::from_u16(potential_move_u16);
+        assert!(potential_move.unstackable, "unstackable should be true");
+        assert!(
+            !potential_move.force_unstack,
+            "force_unstack should be false"
+        );
+
+        // When force_unstack is false, we move the whole stack
+        let actual_move = potential_move.to_move(false);
+        let move_u16 = actual_move.to_u16();
+
+        assert_eq!(move_u16 & 0x7F, 10, "From position should be 10");
+        assert_eq!((move_u16 >> 7) & 0x7F, 20, "To position should be 20");
+        assert_eq!((move_u16 >> 14) & 0x1, 0, "Unstack should be false");
+    }
 }
