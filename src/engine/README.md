@@ -4,7 +4,19 @@ This module provides a GPU-accelerated Monte Carlo Tree Search (MCTS) engine for
 
 ## Architecture
 
-The engine consists of three main components:
+The engine consists of four main components:
+
+### 0. Shared GPU Context (`gpu_context.rs`)
+
+The shared GPU context manages GPU adapter and device selection, ensuring that all GPU-accelerated components use the same GPU device. This prevents resource conflicts and improves efficiency.
+
+Key features:
+- Centralized GPU adapter selection with high-performance preference
+- Shared device and queue for all GPU operations
+- Comprehensive GPU debugging and logging
+- Environment variable support for backend selection (`WGPU_BACKEND`)
+- Detailed error messages for troubleshooting GPU issues
+- Container-aware diagnostics
 
 ### 1. GPU Move Generation (`gpu_move_gen.rs`)
 
@@ -183,6 +195,132 @@ Implements:
 - Validation of move legality
 
 This shader processes multiple board positions simultaneously, applying moves and evaluating the resulting positions.
+
+## Requirements
+
+- WebGPU-compatible GPU (for GPU acceleration)
+- Rust with async support
+- Dependencies: `wgpu`, `bytemuck`, `pollster`, `rand`, `rayon`
+
+## GPU Setup and Troubleshooting
+
+### Environment Variables
+
+- **`WGPU_BACKEND`**: Force a specific graphics backend
+  - `VULKAN`: Force Vulkan backend (Linux, Windows)
+  - `DX12`: Force DirectX 12 backend (Windows)
+  - `METAL`: Force Metal backend (macOS)
+  - `GL`: Force OpenGL backend (fallback)
+  - Not set: Try all available backends (default)
+
+Example:
+```bash
+WGPU_BACKEND=VULKAN cargo run --bin server
+```
+
+### Container GPU Access
+
+When running in Docker containers, GPU access requires additional configuration:
+
+#### Docker GPU Setup
+
+1. **Install NVIDIA Container Toolkit** (for NVIDIA GPUs):
+   ```bash
+   # Ubuntu/Debian
+   distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+   curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+   curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+   sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+   sudo systemctl restart docker
+   ```
+
+2. **Run container with GPU access**:
+   ```bash
+   # NVIDIA GPUs
+   docker run --gpus all -it your-image
+
+   # Specific GPU
+   docker run --gpus device=0 -it your-image
+
+   # AMD GPUs (with ROCm)
+   docker run --device=/dev/kfd --device=/dev/dri -it your-image
+   ```
+
+3. **Verify GPU is accessible inside container**:
+   ```bash
+   docker run --gpus all -it your-image vulkaninfo
+   ```
+
+#### Common Container GPU Issues
+
+**Issue: "No GPU adapters found" but `vulkaninfo` works**
+
+This typically means WGPU cannot detect the GPU even though Vulkan is properly configured. Possible causes:
+
+1. **Missing Vulkan ICD (Installable Client Driver)**:
+   - In Alpine-based images, ensure `vulkan-loader` is installed
+   - The Dockerfile already includes this, but verify it's not removed
+
+2. **WGPU Backend Mismatch**:
+   - Try forcing Vulkan backend: `WGPU_BACKEND=VULKAN`
+   - Some backends may not work in all container configurations
+
+3. **Permissions Issues**:
+   - Ensure the container has access to GPU device files
+   - Check `/dev/dri/` permissions inside container
+
+4. **Runtime vs Build-time**:
+   - GPU must be accessible at runtime, not just build-time
+   - Ensure production deployment has GPU access configured
+
+**Issue: Tests pass locally but fail in CI**
+
+CI environments typically don't have GPU access. Tests are designed to gracefully skip GPU functionality:
+```
+Skipping test: GPU not available - Failed to find an appropriate GPU adapter
+```
+This is expected and normal for CI environments.
+
+**Issue: Different GPU selected than expected**
+
+The shared GPU context uses high-performance preference and logs which GPU is selected:
+```
+✓ Selected GPU: NVIDIA GeForce RTX 3080 (Vulkan)
+```
+Check the logs to see which GPU was selected.
+
+### Debugging GPU Issues
+
+Enable verbose GPU logging by running tests with output:
+```bash
+cargo test -- --nocapture
+```
+
+This will show:
+- All available GPU adapters
+- Which backend is being used
+- Detailed error messages if GPU initialization fails
+- Container-specific troubleshooting hints
+
+Example output:
+```
+🔄 Initializing shared GPU context...
+📊 Found 2 GPU adapter(s):
+   [0] NVIDIA GeForce RTX 3080 - DiscreteGpu (Vulkan)
+   [1] Intel(R) UHD Graphics 630 - IntegratedGpu (Vulkan)
+✓ Selected GPU: NVIDIA GeForce RTX 3080 (Vulkan)
+```
+
+Or if GPU is not found:
+```
+❌ No GPU adapters found!
+   Backends attempted: Backends(VULKAN | GL | METAL | DX12 | BROWSER_WEBGPU)
+   This may indicate:
+   - No GPU drivers installed
+   - GPU not exposed to container (missing --device or --gpus flag)
+   - Vulkan ICD not properly configured
+   Suggestion: Check 'vulkaninfo' output and Docker GPU configuration
+```
 
 ## Requirements
 
