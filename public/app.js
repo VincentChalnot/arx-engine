@@ -240,32 +240,11 @@ function updateMoveHistoryDisplay() {
 }
 
 async function playMove(from, to, unstack = false) {
-    // Find the move in possibleMoves
-    let moveFound = null;
-    for (const move of possibleMoves) {
-        const moveFrom = move & 0x7F;
-        const moveTo = (move >> 7) & 0x7F;
-        const moveUnstack = (move >> 14) & 0x1;
-
-        if (moveFrom === from && moveTo === to) {
-            if (isStacked(from)) {
-                if ((unstack && moveUnstack === 1) || (!unstack && moveUnstack === 0)) {
-                    moveFound = move;
-                    break;
-                }
-            } else {
-                moveFound = move;
-                break;
-            }
-        }
+    let moveBits = (from & 0x7F) | ((to & 0x7F) << 7);
+    if (unstack) {
+        moveBits |= (1 << 14);
     }
-
-    if (moveFound === null) {
-        console.error("Move not found");
-        return;
-    }
-
-    const moveBuffer = new Uint16Array([moveFound]).buffer;
+    const moveBuffer = new Uint16Array([moveBits]).buffer;
     const payload = new Uint8Array(boardData.length + 2);
     payload.set(new Uint8Array(boardData), 0);
     payload.set(new Uint8Array(moveBuffer), boardData.length);
