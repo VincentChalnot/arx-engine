@@ -45,6 +45,9 @@ use rayon::prelude::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+mod gpu_context;
+pub use gpu_context::{GpuContext, get_shared_context};
+
 mod gpu_move_gen;
 pub use gpu_move_gen::MoveGenerationEngine;
 
