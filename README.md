@@ -13,6 +13,7 @@ Arx is played on a 9x9 board. Players control unique pieces, each with specific 
 - **GPU-accelerated MCTS engine** for computer opponent (see [Engine Documentation](src/engine/README.md))
 
 ## Building and Running
+
 Ensure you have [Rust](https://www.rust-lang.org/tools/install) installed.
 
 ```sh
@@ -22,6 +23,33 @@ cargo build --release
 # Run the game (default: interactive TUI)
 cargo run --release
 ```
+
+### GPU Support
+
+The engine uses GPU acceleration for move generation and MCTS simulations. For optimal performance:
+
+**Local Development:**
+```sh
+# Check GPU availability
+./check_gpu.sh
+
+# Force specific GPU backend if needed
+WGPU_BACKEND=VULKAN cargo run --release
+```
+
+**Docker (AMD/Intel GPU):**
+```sh
+# Run with GPU access
+docker compose up
+```
+
+**Docker (NVIDIA GPU):**
+```sh
+# Requires nvidia-container-toolkit
+docker compose -f compose.yaml -f compose.gpu-nvidia.yaml up
+```
+
+For detailed GPU setup and troubleshooting, see the [Engine Documentation](src/engine/README.md#gpu-setup-and-troubleshooting).
 
 ## Command Line Options
 The CLI supports several subcommands:
