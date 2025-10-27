@@ -16,3 +16,8 @@ services:
       - "3000:3000"
     environment:
       - RUST_LOG=info
+      - XDG_RUNTIME_DIR=/tmp/runtime
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
