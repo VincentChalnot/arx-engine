@@ -14,6 +14,18 @@
 //! - Piece value-based position evaluation
 //! - Adjustable engine strength
 //! - Statistics tracking (moves evaluated, simulations run)
+//! - Position caching for instant lookup of previously evaluated positions
+//!
+//! # Caching
+//!
+//! The engine maintains an in-memory cache of evaluated board positions. When a position
+//! is evaluated, the best move and its score are stored in RAM. On subsequent calls with
+//! the same position, the engine returns the cached result immediately without re-running
+//! the search algorithm. This significantly improves performance when analyzing positions
+//! that appear multiple times (e.g., transpositions in game trees).
+//!
+//! Cache statistics (hits, misses, hit rate) are tracked and can be accessed via
+//! `get_statistics()`. The cache can be cleared with `clear_cache()` if needed.
 //!
 //! # Example
 //!
@@ -34,16 +46,23 @@
 //! let board_state = [0u8; 82]; // Your board state
 //! let best_move = engine.find_best_move(&board_state).expect("No legal moves");
 //!
-//! // Get search statistics
+//! // Get search statistics including cache performance
 //! let stats = engine.get_statistics();
 //! println!("Moves evaluated: {}", stats.total_moves_evaluated);
 //! println!("Simulations run: {}", stats.simulations_run);
+//! println!("Cache hits: {}", stats.cache_hits);
+//! println!("Cache hit rate: {:.2}%", stats.cache_hit_rate() * 100.0);
+//!
+//! // Clear cache if needed (e.g., when starting a new game)
+//! engine.clear_cache();
 //! ```
+//!
 
 use rand::Rng;
 use rayon::prelude::*;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 mod gpu_context;
 pub use gpu_context::{GpuContext, get_shared_context};
@@ -110,6 +129,10 @@ pub struct SearchStatistics {
     pub gpu_batches_processed: u64,
     /// Number of CPU simulations (fallback)
     pub cpu_simulations: u64,
+    /// Number of cache hits
+    pub cache_hits: u64,
+    /// Number of cache misses
+    pub cache_misses: u64,
 }
 
 impl SearchStatistics {
@@ -120,6 +143,8 @@ impl SearchStatistics {
         self.last_search_moves = 0;
         self.gpu_batches_processed = 0;
         self.cpu_simulations = 0;
+        self.cache_hits = 0;
+        self.cache_misses = 0;
     }
 
     /// Get average moves per simulation
@@ -130,6 +155,28 @@ impl SearchStatistics {
             self.total_moves_evaluated as f64 / self.simulations_run as f64
         }
     }
+
+    /// Get cache hit rate
+    pub fn cache_hit_rate(&self) -> f64 {
+        let total = self.cache_hits + self.cache_misses;
+        if total == 0 {
+            0.0
+        } else {
+            self.cache_hits as f64 / total as f64
+        }
+    }
+}
+
+/// Cached evaluation data for a board position
+#[derive(Clone, Debug)]
+#[allow(dead_code)] // Fields are stored for potential future use (e.g., incremental updates)
+struct CachedEvaluation {
+    /// Best move found for this position
+    best_move: u16,
+    /// Average score of the best move
+    avg_score: f32,
+    /// Number of simulations that contributed to this evaluation
+    simulations: u32,
 }
 
 /// Monte Carlo Tree Search Engine
@@ -138,6 +185,8 @@ pub struct MctsEngine {
     move_gen: MoveGenerationEngine,
     batch_sim: Option<BatchSimulationEngine>,
     stats: Arc<AtomicStats>,
+    /// Cache for board position evaluations
+    cache: Arc<Mutex<HashMap<[u8; 82], CachedEvaluation>>>,
 }
 
 /// Atomic statistics for thread-safe updates
@@ -146,6 +195,8 @@ struct AtomicStats {
     simulations: AtomicU64,
     gpu_batches: AtomicU64,
     cpu_sims: AtomicU64,
+    cache_hits: AtomicU64,
+    cache_misses: AtomicU64,
 }
 
 impl AtomicStats {
@@ -155,6 +206,8 @@ impl AtomicStats {
             simulations: AtomicU64::new(0),
             gpu_batches: AtomicU64::new(0),
             cpu_sims: AtomicU64::new(0),
+            cache_hits: AtomicU64::new(0),
+            cache_misses: AtomicU64::new(0),
         }
     }
 
@@ -165,6 +218,8 @@ impl AtomicStats {
             last_search_moves,
             gpu_batches_processed: self.gpu_batches.load(Ordering::Relaxed),
             cpu_simulations: self.cpu_sims.load(Ordering::Relaxed),
+            cache_hits: self.cache_hits.load(Ordering::Relaxed),
+            cache_misses: self.cache_misses.load(Ordering::Relaxed),
         }
     }
 
@@ -173,6 +228,8 @@ impl AtomicStats {
         self.simulations.store(0, Ordering::Relaxed);
         self.gpu_batches.store(0, Ordering::Relaxed);
         self.cpu_sims.store(0, Ordering::Relaxed);
+        self.cache_hits.store(0, Ordering::Relaxed);
+        self.cache_misses.store(0, Ordering::Relaxed);
     }
 }
 
@@ -208,6 +265,7 @@ impl MctsEngine {
             move_gen,
             batch_sim,
             stats: Arc::new(AtomicStats::new()),
+            cache: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -347,6 +405,17 @@ impl MctsEngine {
 
     /// Find the best move using MCTS with GPU acceleration and multi-threading
     pub fn find_best_move(&mut self, board: &[u8; 82]) -> Result<u16, String> {
+        // Check cache first
+        {
+            let cache = self.cache.lock().unwrap();
+            if let Some(cached) = cache.get(board) {
+                self.stats.cache_hits.fetch_add(1, Ordering::Relaxed);
+                return Ok(cached.best_move);
+            }
+        }
+        
+        self.stats.cache_misses.fetch_add(1, Ordering::Relaxed);
+        
         // Reset search-specific stats
         let search_start_moves = self.stats.total_moves.load(Ordering::Relaxed);
         
@@ -358,7 +427,15 @@ impl MctsEngine {
         }
 
         if moves.len() == 1 {
-            return Ok(moves[0]);
+            // Cache the single move before returning
+            let best_move = moves[0];
+            let mut cache = self.cache.lock().unwrap();
+            cache.insert(*board, CachedEvaluation {
+                best_move,
+                avg_score: 0.0, // No evaluation needed for forced move
+                simulations: 0,
+            });
+            return Ok(best_move);
         }
 
         // Use GPU batch processing if available
@@ -440,7 +517,7 @@ impl MctsEngine {
             .collect();
 
         // Find move with best average score
-        let best_move = move_scores
+        let best_result = move_scores
             .iter()
             .filter(|(_, _, sims)| *sims > 0)
             .max_by(|a, b| {
@@ -448,8 +525,20 @@ impl MctsEngine {
                 let avg_b = b.1 as f32 / b.2 as f32;
                 avg_a.partial_cmp(&avg_b).unwrap_or(std::cmp::Ordering::Equal)
             })
-            .map(|(mv, _, _)| *mv)
             .ok_or("No valid moves found")?;
+
+        let best_move = best_result.0;
+        let avg_score = best_result.1 as f32 / best_result.2 as f32;
+        
+        // Store in cache
+        {
+            let mut cache = self.cache.lock().unwrap();
+            cache.insert(*board, CachedEvaluation {
+                best_move,
+                avg_score,
+                simulations: best_result.2,
+            });
+        }
 
         Ok(best_move)
     }
@@ -488,7 +577,7 @@ impl MctsEngine {
             .collect();
 
         // Find move with best average score
-        let best_move = move_scores
+        let best_result = move_scores
             .iter()
             .filter(|(_, _, sims)| *sims > 0)
             .max_by(|a, b| {
@@ -496,8 +585,20 @@ impl MctsEngine {
                 let avg_b = b.1 as f32 / b.2 as f32;
                 avg_a.partial_cmp(&avg_b).unwrap_or(std::cmp::Ordering::Equal)
             })
-            .map(|(mv, _, _)| *mv)
             .ok_or("No valid moves found")?;
+
+        let best_move = best_result.0;
+        let avg_score = best_result.1 as f32 / best_result.2 as f32;
+        
+        // Store in cache
+        {
+            let mut cache = self.cache.lock().unwrap();
+            cache.insert(*board, CachedEvaluation {
+                best_move,
+                avg_score,
+                simulations: best_result.2,
+            });
+        }
 
         Ok(best_move)
     }
@@ -511,6 +612,18 @@ impl MctsEngine {
     /// Reset search statistics
     pub fn reset_statistics(&mut self) {
         self.stats.reset();
+    }
+
+    /// Clear the position evaluation cache
+    pub fn clear_cache(&mut self) {
+        let mut cache = self.cache.lock().unwrap();
+        cache.clear();
+    }
+
+    /// Get the current cache size (number of cached positions)
+    pub fn cache_size(&self) -> usize {
+        let cache = self.cache.lock().unwrap();
+        cache.len()
     }
 
     /// Get the current configuration
@@ -601,10 +714,100 @@ mod tests {
         let stats = engine.get_statistics();
         assert_eq!(stats.total_moves_evaluated, 0);
         assert_eq!(stats.simulations_run, 0);
+        assert_eq!(stats.cache_hits, 0);
+        assert_eq!(stats.cache_misses, 0);
         
         // Reset stats
         engine.reset_statistics();
         let stats = engine.get_statistics();
         assert_eq!(stats.total_moves_evaluated, 0);
+    }
+
+    #[test]
+    fn test_cache_basic() {
+        let engine = MctsEngine::new();
+        if let Err(e) = &engine {
+            println!("Skipping test: GPU not available - {}", e);
+            return;
+        }
+        let mut engine = engine.unwrap();
+        
+        // Initial cache should be empty
+        assert_eq!(engine.cache_size(), 0);
+        
+        // Clear cache should work on empty cache
+        engine.clear_cache();
+        assert_eq!(engine.cache_size(), 0);
+    }
+
+    #[test]
+    fn test_cache_statistics() {
+        let engine = MctsEngine::new();
+        if let Err(e) = &engine {
+            println!("Skipping test: GPU not available - {}", e);
+            return;
+        }
+        let engine = engine.unwrap();
+        
+        // Initial stats should show no cache hits or misses
+        let stats = engine.get_statistics();
+        assert_eq!(stats.cache_hits, 0);
+        assert_eq!(stats.cache_misses, 0);
+        assert_eq!(stats.cache_hit_rate(), 0.0);
+    }
+
+    #[test]
+    fn test_cache_integration() {
+        let config = EngineConfig {
+            max_depth: 2,
+            simulations_per_move: 10, // Low count for faster testing
+            exploration_constant: 1.414,
+            gpu_batch_size: 64,
+            use_gpu_simulation: false, // Use CPU for consistency
+        };
+        
+        let engine = MctsEngine::with_config(config);
+        if let Err(e) = &engine {
+            println!("Skipping test: GPU not available - {}", e);
+            return;
+        }
+        let mut engine = engine.unwrap();
+        
+        // Create a test board with some pieces
+        let mut board = [0u8; 82];
+        board[81] = 1; // White to move
+        board[40] = 0b1000001; // White Soldier
+        
+        // First call - should be a cache miss
+        let result1 = engine.find_best_move(&board);
+        assert!(result1.is_ok());
+        
+        let stats1 = engine.get_statistics();
+        assert_eq!(stats1.cache_misses, 1);
+        assert_eq!(stats1.cache_hits, 0);
+        assert_eq!(engine.cache_size(), 1);
+        
+        // Second call with same position - should be a cache hit
+        let result2 = engine.find_best_move(&board);
+        assert!(result2.is_ok());
+        
+        let stats2 = engine.get_statistics();
+        assert_eq!(stats2.cache_hits, 1);
+        assert_eq!(stats2.cache_misses, 1);
+        assert_eq!(stats2.cache_hit_rate(), 0.5);
+        
+        // Results should be the same
+        assert_eq!(result1.unwrap(), result2.unwrap());
+        
+        // Clear cache
+        engine.clear_cache();
+        assert_eq!(engine.cache_size(), 0);
+        
+        // Third call after clear - should be a cache miss again
+        let _result3 = engine.find_best_move(&board);
+        let stats3 = engine.get_statistics();
+        assert_eq!(stats3.cache_misses, 2);
+        assert_eq!(stats3.cache_hits, 1);
+        assert_eq!(engine.cache_size(), 1);
     }
 }
