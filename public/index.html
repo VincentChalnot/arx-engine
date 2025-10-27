@@ -35,12 +35,19 @@
     }
     .selected {
       background-color: #7fa0dd !important; /* Cornflower blue */
+      box-shadow: 0 0 10px 3px #7fa0dd;
     }
-    .possible-move {
+    .move-basic {
       background-color: #55d157 !important; /* Light green */
     }
-    .hovered-move {
-      background-color: #e1ca58 !important; /* Soft yellow for hovered moves */
+    .move-unstackable {
+      background-color: #ffe97a !important; /* Light yellow */
+    }
+    .hovered-basic {
+      background-color: #c6f7c7 !important; /* Very light green */
+    }
+    .hovered-unstackable {
+      background-color: #fff7c7 !important; /* Very light yellow */
     }
     .white-piece {
         color: white;
@@ -82,7 +89,7 @@
         </div>
         <div class="move-history">
           <label class="label">Move History</label>
-          <textarea class="textarea" id="move-history" placeholder="B1-D2 F9-E8&#10;E1-F2 B7-C6&#10;..."></textarea>
+          <textarea class="textarea" id="move-history" placeholder=""></textarea>
           <div class="buttons mt-2">
             <button class="button is-info" id="load-game-btn">Load</button>
             <button class="button is-warning" id="undo-btn">Undo</button>
