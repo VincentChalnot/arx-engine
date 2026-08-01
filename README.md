@@ -31,9 +31,13 @@ for the full illustrated rules.
 - **HTTP server** (`src/server.rs`, binary target `server`): the binary wire
   API consumed by keres-platform. See [`docs/PROTOCOL.md`](docs/PROTOCOL.md)
   for the exact byte layout.
-- **CLI / TUI** (`src/main.rs`, `src/tui.rs`, binary target `keres`): play a
-  hotseat game in the terminal, inspect legal moves, ask the engine for a
-  move, or dump a full search tree for debugging.
+- **CLI** (`src/main.rs`, binary target `keres`): inspect legal moves, ask the
+  engine for a move, or dump a full search tree for debugging — plain text,
+  no UI.
+- **Native GUI** (`src/gui/`, binary target `gui`, behind the `gui` feature): a
+  self-contained [minifb](https://github.com/emoon/minifb) desktop app for
+  hotseat or vs-AI play — no browser, no server. Build with
+  `cargo build --bin gui --features gui`.
 
 ## The AI
 
@@ -64,11 +68,6 @@ Requires a stable Rust toolchain (see `Cargo.toml` for the edition).
 cargo run --bin server
 # PORT env var selects the listen port (default 3000)
 
-# Terminal hotseat game (TUI)
-cargo run --bin keres
-# equivalent: cargo run --bin keres -- play
-# resume a saved game: cargo run --bin keres -- play --board <base64 Game>
-
 # List legal moves for a board (all squares, or one position)
 cargo run --bin keres -- show-moves [--board <base64>] [coordinates]
 
@@ -78,13 +77,17 @@ cargo run --bin keres -- engine-move [--board <base64>]
 # Dump the search tree (JSONL) for a move sequence — tuning/debugging
 cargo run --bin keres -- debug-tree [--moves <base64>] [--full-tree] \
   [--max-depth N] [--no-tt] [--no-ab] [--no-quiescence] [--no-killers]
+
+# Native desktop GUI (hotseat or vs-AI). The `gui` Cargo feature pulls in
+# minifb; it's optional so the server/CLI stay free of the X11 dependency.
+cargo run --bin gui --features gui
 ```
 
 ```bash
 # Test / lint (also run in CI, see .github/workflows/ci.yaml)
-cargo test --workspace
+cargo test --workspace --features gui
 cargo fmt --check
-cargo clippy --workspace --all-targets
+cargo clippy --workspace --all-targets --features gui
 ```
 
 ### Docker
@@ -101,9 +104,9 @@ publishes it to `ghcr.io/vincentchalnot/keres/backend` on every push to
 
 ## Roadmap
 
-- **Native GUI** — a standalone binary (no browser, no platform/server
-  dependency) for people who want to play Keres against the AI without going
-  through playkeres.com. Planned; not started.
+- **Native GUI** — shipped as the `gui` binary (`src/gui/`, minifb): play
+  hotseat or against the AI in a self-contained desktop app, no browser or
+  server required.
 - Adjustable AI difficulty (currently fixed at depth 4).
 
 ## License

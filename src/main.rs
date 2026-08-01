@@ -1,13 +1,10 @@
 use base64::{engine::general_purpose, Engine as _};
 use clap::{Args, Parser, Subcommand};
-use keres_engine::cli_rendering::get_game_hash;
 use keres_engine::engine::search::root_search;
 use keres_engine::engine::tree_recorder::TreeRecorder;
 use keres_engine::engine::types::SearchConfig;
 use keres_engine::moves::Move;
-use keres_engine::{
-    cli_rendering::display_stack, run_tui, Game, Position, BOARD_DIMENSION, BOARD_SIZE,
-};
+use keres_engine::{cli_rendering::display_stack, Game, Position, BOARD_DIMENSION, BOARD_SIZE};
 use std::time::Instant;
 
 // musl's default allocator has severe lock contention under multi-threading
@@ -25,19 +22,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Play(PlayArgs),
     ShowMoves(ShowMovesArgs),
     /// Request an engine move for a given board
     EngineMove(EngineMoveArgs),
     /// Run the search engine on a board loaded from a move list, output results as JSON
     DebugTree(DebugTreeArgs),
-}
-
-#[derive(Args)]
-struct PlayArgs {
-    /// Base64 encoded board data to import
-    #[arg(long)]
-    board: Option<String>,
 }
 
 #[derive(Args)]
@@ -85,7 +74,6 @@ fn main() {
     let cli = Cli::parse();
 
     let board_data = match &cli.command {
-        Some(Commands::Play(args)) => args.board.as_deref(),
         Some(Commands::ShowMoves(args)) => args.board.as_deref(),
         Some(Commands::EngineMove(args)) => args.board.as_deref(),
         Some(Commands::DebugTree(_)) => None, // DebugTree builds its own game from moves
@@ -141,15 +129,8 @@ fn main() {
             }
         },
         _ => {
-            match run_tui(Some(game)) {
-                Ok(g) => {
-                    println!("Game hash: {}", get_game_hash(&g));
-                    println!("(use this to resume the game later on with the --board option)");
-                }
-                Err(e) => {
-                    eprintln!("Error: {}", e);
-                }
-            };
+            eprintln!("No command given.");
+            eprintln!("Available: show-moves, engine-move, debug-tree (run `keres --help`)");
         }
     }
 

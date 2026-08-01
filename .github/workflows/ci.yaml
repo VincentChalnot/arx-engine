@@ -34,12 +34,15 @@ jobs:
         run: cargo fmt --check
 
       - name: cargo test
-        run: cargo test --workspace
+        # The `gui` feature pulls in the minifb GUI binary and its unit tests.
+        # minifb's X11 backend is dlopen-based, so it builds & tests headless
+        # with no extra system packages (a window is only opened at runtime).
+        run: cargo test --workspace --features gui
 
       - name: cargo clippy
         # Informational only until the existing warning backlog is cleared —
         # does not block CI. Remove continue-on-error once clean.
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --features gui -- -D warnings
         continue-on-error: true
 
   build:

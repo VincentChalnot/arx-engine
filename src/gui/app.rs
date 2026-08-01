@@ -1,0 +1,523 @@
+//! Game state machine: menu / playing / game-over, click handling and the
+//! background AI-search thread.
+
+use keres_engine::{Color, Game, Move, MoveGenerator, Position, PotentialMove};
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Mode {
+    Hotseat,
+    VsAiWhite, // human plays White, engine plays Black
+    VsAiBlack, // human plays Black, engine plays White
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Screen {
+    Menu,
+    Playing,
+    GameOver,
+}
+
+pub struct PendingChoice {
+    pub options: Vec<Move>,
+}
+
+pub struct App {
+    pub screen: Screen,
+    pub mode: Mode,
+    pub game: Game,
+    pub selected: Option<Position>,
+    pub legal: Vec<PotentialMove>,
+    pub pending: Option<PendingChoice>,
+    ai_rx: Option<Receiver<Option<Move>>>,
+    pub ai_thinking: bool,
+    pub flipped: bool,
+    pub show_threats: bool,
+    pub show_coords: bool,
+    /// Applied moves with whether each was a capture, for the history panel.
+    pub history: Vec<(Move, bool)>,
+    undo_stack: Vec<(Move, keres_engine::UndoInfo)>,
+}
+
+impl App {
+    pub fn new() -> Self {
+        App {
+            screen: Screen::Menu,
+            mode: Mode::Hotseat,
+            game: Game::new(),
+            selected: None,
+            legal: Vec::new(),
+            pending: None,
+            ai_rx: None,
+            ai_thinking: false,
+            flipped: false,
+            show_threats: true,
+            show_coords: true,
+            history: Vec::new(),
+            undo_stack: Vec::new(),
+        }
+    }
+
+    pub fn start_game(&mut self, mode: Mode) {
+        self.mode = mode;
+        self.game = Game::new();
+        self.selected = None;
+        self.legal.clear();
+        self.pending = None;
+        self.ai_rx = None;
+        self.ai_thinking = false;
+        self.history.clear();
+        self.undo_stack.clear();
+        self.screen = Screen::Playing;
+        crate::save::clear();
+        self.maybe_start_ai();
+    }
+
+    /// Rebuild a game from a saved (mode, move list) pair, replaying every
+    /// move so history/undo state and any in-progress AI turn are correct.
+    pub fn resume_game(&mut self, mode: Mode, moves: Vec<Move>) {
+        self.mode = mode;
+        self.game = Game::new();
+        self.selected = None;
+        self.legal.clear();
+        self.pending = None;
+        self.ai_rx = None;
+        self.ai_thinking = false;
+        self.history.clear();
+        self.undo_stack.clear();
+        self.screen = Screen::Playing;
+        for mv in moves {
+            let is_capture = self
+                .game
+                .board
+                .get_piece(&mv.to)
+                .map(|p| p.color != self.game.color_to_move())
+                .unwrap_or(false);
+            let undo = self.game.make(&mv);
+            self.history.push((mv, is_capture));
+            self.undo_stack.push((mv, undo));
+        }
+        self.maybe_start_ai();
+    }
+
+    pub fn is_ai_turn(&self) -> bool {
+        match self.mode {
+            Mode::Hotseat => false,
+            Mode::VsAiWhite => self.game.color_to_move() == Color::Black,
+            Mode::VsAiBlack => self.game.color_to_move() == Color::White,
+        }
+    }
+
+    fn maybe_start_ai(&mut self) {
+        if self.game.is_game_over() {
+            self.screen = Screen::GameOver;
+            crate::save::clear();
+            return;
+        }
+        if self.is_ai_turn() {
+            self.ai_thinking = true;
+            let game_clone = self.game.clone();
+            let (tx, rx) = mpsc::channel();
+            thread::spawn(move || {
+                let mv = keres_engine::engine::find_best_move(&game_clone, None, None);
+                let _ = tx.send(mv);
+            });
+            self.ai_rx = Some(rx);
+        }
+    }
+
+    /// Call once per frame: applies the engine's move once the background
+    /// search has finished.
+    pub fn poll_ai(&mut self) {
+        let Some(rx) = &self.ai_rx else { return };
+        if let Ok(mv) = rx.try_recv() {
+            self.ai_thinking = false;
+            self.ai_rx = None;
+            if let Some(mv) = mv {
+                self.apply_move(mv);
+            }
+        }
+    }
+
+    fn apply_move(&mut self, mv: Move) {
+        let is_capture = self
+            .game
+            .board
+            .get_piece(&mv.to)
+            .map(|p| p.color != self.game.color_to_move())
+            .unwrap_or(false);
+        let undo = self.game.make(&mv);
+        self.history.push((mv, is_capture));
+        self.undo_stack.push((mv, undo));
+        self.selected = None;
+        self.legal.clear();
+        self.pending = None;
+        if self.game.is_game_over() {
+            self.screen = Screen::GameOver;
+            crate::save::clear();
+        } else {
+            let moves: Vec<Move> = self.history.iter().map(|(m, _)| *m).collect();
+            crate::save::save(self.mode, &moves);
+            self.maybe_start_ai();
+        }
+    }
+
+    /// Undo the human's last move. When playing the AI, also undoes the
+    /// engine's reply first so control always returns to the human.
+    pub fn undo(&mut self) {
+        if self.ai_thinking || self.pending.is_some() || self.undo_stack.is_empty() {
+            return;
+        }
+        while let Some((mv, undo)) = self.undo_stack.pop() {
+            self.game.unmake(&mv, undo);
+            self.history.pop();
+            if self.mode == Mode::Hotseat || !self.is_ai_turn() || self.undo_stack.is_empty() {
+                break;
+            }
+        }
+        self.selected = None;
+        self.legal.clear();
+        self.pending = None;
+        self.screen = Screen::Playing;
+        if self.history.is_empty() {
+            crate::save::clear();
+        } else {
+            let moves: Vec<Move> = self.history.iter().map(|(m, _)| *m).collect();
+            crate::save::save(self.mode, &moves);
+        }
+    }
+
+    /// The current side to move resigns; the opponent wins immediately.
+    pub fn resign(&mut self) {
+        if self.screen != Screen::Playing || self.pending.is_some() {
+            return;
+        }
+        let resigning = self.game.color_to_move();
+        self.game
+            .set_game_over(true, resigning == Color::Black, false);
+        self.screen = Screen::GameOver;
+        self.ai_rx = None;
+        self.ai_thinking = false;
+        crate::save::clear();
+    }
+
+    pub fn toggle_flip(&mut self) {
+        self.flipped = !self.flipped;
+    }
+
+    pub fn toggle_threats(&mut self) {
+        self.show_threats = !self.show_threats;
+    }
+
+    pub fn toggle_coords(&mut self) {
+        self.show_coords = !self.show_coords;
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.ai_thinking && self.pending.is_none() && !self.undo_stack.is_empty()
+    }
+
+    /// Squares holding one of the side-to-move's pieces that the opponent
+    /// could capture on their next turn (pseudo-legal move generation).
+    pub fn threatened_squares(&self) -> Vec<Position> {
+        let opponent_is_white = !self.game.is_white_to_move();
+        let mover = self.game.color_to_move();
+        let mut out: Vec<Position> = Vec::new();
+        for pm in MoveGenerator::new(&self.game.board, opponent_is_white).get_all_moves() {
+            if let Some(p) = self.game.board.get_piece(&pm.to) {
+                if p.color == mover && !out.contains(&pm.to) {
+                    out.push(pm.to);
+                }
+            }
+        }
+        out
+    }
+
+    /// Handle a click on board square `pos` while in the Playing screen.
+    pub fn click_square(&mut self, pos: Position) {
+        if self.ai_thinking || self.pending.is_some() {
+            return;
+        }
+        if let Some(sel) = self.selected {
+            let mut matches: Vec<Move> = Vec::new();
+            for pm in self.legal.iter().filter(|pm| pm.to == pos) {
+                for mv in pm.to_moves() {
+                    if !matches.iter().any(|m: &Move| m.unstack == mv.unstack) {
+                        matches.push(mv);
+                    }
+                }
+            }
+            if !matches.is_empty() {
+                if matches.len() == 1 {
+                    self.apply_move(matches[0]);
+                } else {
+                    self.pending = Some(PendingChoice { options: matches });
+                }
+                return;
+            }
+            self.selected = None;
+            self.legal.clear();
+            if pos != sel {
+                self.try_select(pos);
+            }
+        } else {
+            self.try_select(pos);
+        }
+    }
+
+    fn try_select(&mut self, pos: Position) {
+        if let Some(piece) = self.game.board.get_piece(&pos) {
+            if piece.color == self.game.color_to_move() {
+                let moves = self.game.get_moves(&pos);
+                if !moves.is_empty() {
+                    self.selected = Some(pos);
+                    self.legal = moves;
+                }
+            }
+        }
+    }
+
+    pub fn resolve_choice(&mut self, index: usize) {
+        if let Some(choice) = self.pending.take() {
+            if let Some(&mv) = choice.options.get(index) {
+                self.apply_move(mv);
+            } else {
+                self.pending = None;
+            }
+        }
+    }
+
+    pub fn cancel_choice(&mut self) {
+        self.pending = None;
+        self.selected = None;
+        self.legal.clear();
+    }
+
+    /// Deduplicated set of legal destination squares for the current
+    /// selection, with whether landing there captures an enemy piece.
+    pub fn target_squares(&self) -> Vec<(Position, bool)> {
+        let mut out: Vec<(Position, bool)> = Vec::new();
+        for pm in &self.legal {
+            let is_capture = self
+                .game
+                .board
+                .get_piece(&pm.to)
+                .map(|p| p.color != self.game.color_to_move())
+                .unwrap_or(false);
+            if !out.iter().any(|(p, _)| *p == pm.to) {
+                out.push((pm.to, is_capture));
+            }
+        }
+        out
+    }
+
+    pub fn back_to_menu(&mut self) {
+        self.screen = Screen::Menu;
+        self.ai_rx = None;
+        self.ai_thinking = false;
+    }
+}
+
+/// Human-readable label for one disambiguated stack-move choice.
+pub fn move_choice_label(game: &Game, mv: &Move) -> String {
+    let Some(piece) = game.board.get_piece(&mv.from) else {
+        return "MOVE".to_string();
+    };
+    if mv.unstack {
+        if let Some(top) = piece.top {
+            return format!("MOVE {} ONLY", piece_name(top));
+        }
+    }
+    if piece.top.is_some() {
+        "MOVE WHOLE STACK".to_string()
+    } else {
+        format!("MOVE {}", piece_name(piece.bottom))
+    }
+}
+
+fn piece_name(pt: keres_engine::PieceType) -> &'static str {
+    use keres_engine::PieceType::*;
+    match pt {
+        Soldier => "SOLDIER",
+        Bishop => "BISHOP",
+        Rook => "ROOK",
+        Paladin => "PALADIN",
+        Guard => "GUARD",
+        Knight => "KNIGHT",
+        Ballista => "BALLISTA",
+        King => "KING",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn ai_thread_moves_automatically_when_it_is_its_turn() {
+        let mut app = App::new();
+        // Human plays Black -> AI plays White and must move first.
+        app.start_game(Mode::VsAiBlack);
+        assert!(
+            app.ai_thinking,
+            "engine should start thinking on White's turn"
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.ai_thinking && Instant::now() < deadline {
+            app.poll_ai();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!app.ai_thinking, "engine did not finish its move in time");
+        assert!(app.game.moves_without_capture() >= 1 || app.game.is_game_over());
+        // A move was actually applied: it is now Black's turn.
+        assert_eq!(app.game.color_to_move(), Color::Black);
+    }
+
+    #[test]
+    fn hotseat_never_starts_ai_thread() {
+        let mut app = App::new();
+        app.start_game(Mode::Hotseat);
+        assert!(!app.ai_thinking);
+        assert!(!app.is_ai_turn());
+    }
+
+    #[test]
+    fn ambiguous_stack_move_offers_exactly_two_deduped_choices() {
+        use keres_engine::{Board, Piece, PieceType};
+
+        let mut board = Board::empty();
+        board.set_piece(
+            &Position::new(4, 8),
+            Some(Piece::new(Color::White, PieceType::King, None)),
+        );
+        board.set_piece(
+            &Position::new(4, 0),
+            Some(Piece::new(Color::Black, PieceType::King, None)),
+        );
+        board.set_piece(
+            &Position::new(4, 4),
+            Some(Piece::new(
+                Color::White,
+                PieceType::Soldier,
+                Some(PieceType::Bishop),
+            )),
+        );
+        let mut app = App::new();
+        app.mode = Mode::Hotseat;
+        app.game = Game::from_board(board);
+
+        app.click_square(Position::new(4, 4));
+        assert!(app.selected.is_some(), "stacked piece should be selectable");
+
+        // One step diagonally forward is reachable both by the soldier
+        // (bottom, whole stack only) and the bishop (top, either half).
+        app.click_square(Position::new(5, 3));
+        let pending = app
+            .pending
+            .as_ref()
+            .expect("expected a disambiguation prompt");
+        assert_eq!(
+            pending.options.len(),
+            2,
+            "expected exactly one deduped choice per unstack flag"
+        );
+        assert!(pending.options.iter().any(|m| m.unstack));
+        assert!(pending.options.iter().any(|m| !m.unstack));
+
+        app.resolve_choice(0);
+        assert!(app.pending.is_none());
+        assert!(app.game.board.get_piece(&Position::new(5, 3)).is_some());
+    }
+
+    #[test]
+    fn undo_restores_previous_position_and_history() {
+        let mut app = App::new();
+        app.start_game(Mode::Hotseat);
+        let before = app.game.board_hash();
+        app.click_square(Position::new(2, 6));
+        app.click_square(Position::new(1, 5));
+        assert_eq!(app.history.len(), 1);
+        assert_ne!(app.game.board_hash(), before);
+
+        app.undo();
+        assert_eq!(
+            app.game.board_hash(),
+            before,
+            "board should match pre-move state"
+        );
+        assert!(app.history.is_empty());
+        assert!(!app.can_undo());
+    }
+
+    #[test]
+    fn undo_vs_ai_returns_control_to_the_human() {
+        let mut app = App::new();
+        app.start_game(Mode::VsAiBlack); // AI plays White and moves first
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.ai_thinking && Instant::now() < deadline {
+            app.poll_ai();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(app.history.len(), 1, "AI should have made its opening move");
+
+        // Human (Black) replies with any legal move, via the real click
+        // path so undo_stack stays in sync with history.
+        let pm = app.game.get_all_moves()[0];
+        app.click_square(pm.from);
+        app.click_square(pm.to);
+        assert_eq!(app.history.len(), 2, "human reply should be recorded too");
+
+        // The human's reply immediately triggers the AI's next search;
+        // real UI disables Undo while ai_thinking, so wait it out too.
+        let deadline2 = Instant::now() + Duration::from_secs(10);
+        while app.ai_thinking && Instant::now() < deadline2 {
+            app.poll_ai();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(app.history.len(), 3, "AI should have replied a second time");
+
+        app.undo();
+        // Undo must land back on the human's turn, not mid-AI-turn.
+        assert!(!app.is_ai_turn());
+        assert!(!app.ai_thinking);
+    }
+
+    #[test]
+    fn resign_ends_the_game_for_the_opponent() {
+        let mut app = App::new();
+        app.start_game(Mode::Hotseat); // White to move
+        app.resign();
+        assert_eq!(app.screen, Screen::GameOver);
+        assert!(app.game.is_game_over());
+        assert!(
+            !app.game.white_wins(),
+            "White resigned, so Black should win"
+        );
+    }
+
+    #[test]
+    fn save_and_resume_round_trip_reproduces_the_position() {
+        crate::save::set_test_path_override(std::env::temp_dir().join("keres_test_save_app.bin"));
+        crate::save::clear();
+        let mut app = App::new();
+        app.start_game(Mode::Hotseat);
+        app.click_square(Position::new(2, 6));
+        app.click_square(Position::new(1, 5));
+        app.click_square(Position::new(6, 2));
+        app.click_square(Position::new(7, 3));
+        let expected_hash = app.game.board_hash();
+        let expected_history_len = app.history.len();
+
+        let (mode, moves) = crate::save::load().expect("apply_move should have autosaved");
+        assert_eq!(mode, Mode::Hotseat);
+
+        let mut resumed = App::new();
+        resumed.resume_game(mode, moves);
+        assert_eq!(resumed.game.board_hash(), expected_hash);
+        assert_eq!(resumed.history.len(), expected_history_len);
+        crate::save::clear();
+    }
+}

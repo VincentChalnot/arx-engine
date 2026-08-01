@@ -14,12 +14,13 @@ contract with them is the binary HTTP API described in
 
 ## Project overview
 
-Two binaries share one library crate (`keres_engine`, `src/lib.rs`):
+Three binaries share one library crate (`keres_engine`, `src/lib.rs`):
 
 | Binary   | Entry point    | Purpose                                                        |
 |----------|-----------------|------------------------------------------------------------------|
 | `server` | `src/server.rs` | HTTP server exposing the binary wire API (see `docs/PROTOCOL.md`) |
-| `keres`  | `src/main.rs`   | CLI: terminal TUI hotseat game, move listing, engine queries, search-tree debugging |
+| `keres` | `src/main.rs`   | CLI: move listing, engine queries, search-tree debugging (plain text, no UI) |
+| `gui`   | `src/gui/main.rs` | Native minifb desktop GUI for hotseat or vs-AI play (behind the `gui` Cargo feature) |
 
 ## Layout
 
@@ -30,7 +31,6 @@ Two binaries share one library crate (`keres_engine`, `src/lib.rs`):
 | `src/moves.rs`                | `Move`, `PotentialMove`, `MoveGenerator` — legal move generation per piece type |
 | `src/game_over.rs`            | Win/draw condition checks (king capture, 50-move rule, insufficient material, etc.) |
 | `src/cli_rendering.rs`        | Terminal board rendering + game-state hashing used by the CLI        |
-| `src/tui.rs`                  | Interactive terminal UI ([ratatui](https://ratatui.rs)) for hotseat play |
 | `src/engine/`                  | The AI: search, evaluation, types/config                              |
 | `src/engine/search/`            | Negamax + alpha-beta (`alpha_beta.rs`, `negamax.rs`), quiescence, killer moves, loop/repetition detection, root entry point (`mod.rs::root_search`) |
 | `src/engine/eval/`               | Position evaluation: material, mobility, king safety, pins, promotion, piece-square tables, tempo |
@@ -38,7 +38,8 @@ Two binaries share one library crate (`keres_engine`, `src/lib.rs`):
 | `src/engine/constants.rs`         | Tunables: `MAX_DEPTH` (4), eval weights                                |
 | `src/engine/tree_recorder.rs`      | Optional full search-tree recording for `debug-tree`                    |
 | `src/server.rs`               | Axum HTTP server — see `docs/PROTOCOL.md` for every route              |
-| `src/main.rs`                 | `clap` CLI — subcommands: `play` (default), `show-moves`, `engine-move`, `debug-tree` |
+| `src/main.rs`                 | `clap` CLI — subcommands: `show-moves`, `engine-move`, `debug-tree` |
+| `src/gui/`                    | Native minifb GUI binary (`gui` target, `gui` Cargo feature): app state machine, software rasterizer, autosave — ported from micro-keres |
 | `docs/PROTOCOL.md`            | Wire protocol reference — regenerate/re-verify against `server.rs`/`board.rs`/`game.rs`/`moves.rs` if any of those change; do not let it drift |
 
 ## Conventions
@@ -70,12 +71,13 @@ Two binaries share one library crate (`keres_engine`, `src/lib.rs`):
 ## Dev commands
 
 ```bash
-cargo test --workspace              # unit tests (game rules, encoding round-trips, search)
+cargo test --workspace --features gui   # unit tests (game rules, encoding round-trips, search, GUI logic)
 cargo fmt --check                   # formatting (CI-blocking)
-cargo clippy --workspace --all-targets -- -D warnings   # lints (CI-informational; fix what you touch)
+cargo clippy --workspace --all-targets --features gui -- -D warnings   # lints (CI-informational; fix what you touch)
 cargo run --bin server              # HTTP server on :3000 (PORT env var to override)
-cargo run --bin keres                # terminal hotseat game
+cargo run --bin keres -- engine-move  # ask the engine for its best move (plain-text CLI)
 cargo run --bin keres -- debug-tree --moves <base64> --full-tree   # search-tree debugging
+cargo run --bin gui --features gui   # native minifb desktop GUI (gui feature pulls in minifb)
 ```
 
 No `docker` requirement for engine development — the toolchain runs
@@ -94,8 +96,9 @@ xxd /tmp/moves.bin   # inspect the returned PotentialMove list (see docs/PROTOCO
 
 ## Roadmap context
 
-A native GUI binary (no browser, no keres-platform dependency) is planned —
-see the README roadmap. When that work starts, it belongs in this repo as a
-new binary target (e.g. `src/gui.rs` / a `gui` binary), reusing
-`keres_engine`'s existing `Board`/`Game`/`MoveGenerator`/search — do not fork
-game logic into a separate crate for it.
+The native GUI binary (`gui`, `src/gui/main.rs`, behind the `gui` Cargo
+feature) is a self-contained minifb desktop app ported from the micro-keres
+contest build. It reuses `keres_engine`'s `Board`/`Game`/`MoveGenerator`/search
+— game logic is never forked into a separate crate. The `gui` feature is
+optional so the server/CLI (and the Docker server build) stay free of the
+minifb/X11 dependency; build it with `cargo run --bin gui --features gui`.
