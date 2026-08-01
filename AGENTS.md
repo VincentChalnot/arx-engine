@@ -70,6 +70,13 @@ Three binaries share one library crate (`keres_engine`, `src/lib.rs`):
 
 ## Dev commands
 
+A `Makefile` encodes the correct profile + Cargo feature per binary — prefer it
+(`make cli`, `make server`, `make gui`, `make all`, `make test`, `make check`,
+`make sizes`; run `make help` for the full list). The GUI builds with the
+size-optimized `gui` profile (`opt-level="z"`, LTO, `panic="abort"`, strip); the
+server/CLI build with `--release` (speed; AI latency-critical). Raw cargo
+equivalents:
+
 ```bash
 cargo test --workspace --features gui   # unit tests (game rules, encoding round-trips, search, GUI logic)
 cargo fmt --check                   # formatting (CI-blocking)
@@ -77,7 +84,7 @@ cargo clippy --workspace --all-targets --features gui -- -D warnings   # lints (
 cargo run --bin server              # HTTP server on :3000 (PORT env var to override)
 cargo run --bin keres -- engine-move  # ask the engine for its best move (plain-text CLI)
 cargo run --bin keres -- debug-tree --moves <base64> --full-tree   # search-tree debugging
-cargo run --bin gui --features gui   # native minifb desktop GUI (gui feature pulls in minifb)
+cargo run --profile gui --bin gui --features gui   # native GUI, size-optimized (or: make run-gui)
 ```
 
 No `docker` requirement for engine development — the toolchain runs

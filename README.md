@@ -63,6 +63,15 @@ Negamax search already outperforms for this game size.
 
 Requires a stable Rust toolchain (see `Cargo.toml` for the edition).
 
+A `Makefile` builds each binary with the profile and features that suit it:
+
+- `make server` / `make cli` — `--release` (speed; the AI search is latency-critical)
+- `make gui` — the size-optimized `gui` profile (`opt-level="z"`, fat LTO,
+  `panic="abort"`, strip) → ~577 KB (the micro-keres <1.44 MB lineage)
+- `make all` / `make test` / `make check` / `make sizes` — run `make help` for all
+
+Or the equivalent cargo commands directly:
+
 ```bash
 # HTTP server (the binary wire API, see docs/PROTOCOL.md)
 cargo run --bin server
@@ -78,9 +87,10 @@ cargo run --bin keres -- engine-move [--board <base64>]
 cargo run --bin keres -- debug-tree [--moves <base64>] [--full-tree] \
   [--max-depth N] [--no-tt] [--no-ab] [--no-quiescence] [--no-killers]
 
-# Native desktop GUI (hotseat or vs-AI). The `gui` Cargo feature pulls in
-# minifb; it's optional so the server/CLI stay free of the X11 dependency.
-cargo run --bin gui --features gui
+# Native desktop GUI (hotseat or vs-AI), size-optimized via the `gui` profile.
+# The `gui` Cargo feature pulls in minifb; it's optional so the server/CLI stay
+# free of the X11 dependency. (`make gui` / `make run-gui` do the same.)
+cargo run --profile gui --bin gui --features gui
 ```
 
 ```bash
