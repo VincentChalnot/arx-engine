@@ -23,7 +23,7 @@ GUI_BIN    := target/$(GUI_PROFILE)/gui
 .DEFAULT_GOAL := all
 
 .PHONY: all help cli server gui test test-core fmt fmt-fix clippy check sizes \
-        run-cli run-server run-gui clean
+        run-cli run-server run-gui clean icons
 
 all: cli server gui  ## Build all three binaries
 
@@ -35,7 +35,7 @@ cli:  ## Plain-text CLI (keres): show-moves / engine-move / debug-tree
 server:  ## HTTP server (the binary wire API; see docs/PROTOCOL.md)
 	$(CARGO) build --release --bin server
 
-gui:  ## Native minifb desktop GUI (size-optimized; enables the `gui` feature)
+gui: src/gui/icons.rs  ## Native minifb desktop GUI (size-optimized; enables the `gui` feature)
 	$(CARGO) build --profile $(GUI_PROFILE) --bin gui --features gui
 	@# UPX is applied opportunistically — it shrinks the GUI another ~50-60%
 	@# but needs the `upx` binary (dnf install upx / apt install upx). No-op
@@ -88,6 +88,15 @@ run-server: server  ## Run the HTTP server (PORT env var selects the listen port
 
 run-gui: gui  ## Run the native GUI
 	./$(GUI_BIN)
+
+##@ Icons
+
+ICON_SRCS := $(wildcard assets/pixel/icons/*.xcf)
+
+src/gui/icons.rs: $(ICON_SRCS) scripts/gen_icons.py
+	python3 scripts/gen_icons.py
+
+icons: src/gui/icons.rs  ## Regenerate src/gui/icons.rs from assets/pixel/icons/*.xcf
 
 ##@ Misc
 
