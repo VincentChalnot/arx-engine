@@ -22,3 +22,6 @@ target/
 
 # Local environment overrides (may contain secrets) — never commit.
 /.env
+
+# Python bytecode cache (scripts/*.py)
+__pycache__/

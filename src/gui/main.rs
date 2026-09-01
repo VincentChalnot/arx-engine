@@ -1,13 +1,15 @@
 mod app;
+mod base;
 mod font;
 mod icons;
 mod render;
 mod save;
+mod symbols;
 
 use app::{move_choice_label, App, Mode, Screen};
 use keres_engine::{Move, Piece, Position};
 use minifb::{Key, KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
-use render::{Canvas, BOARD_PX, BOARD_W, GUTTER, LOGICAL_H, LOGICAL_W, TILE, TOPBAR};
+use render::{Canvas, BOARD_PX_H, BOARD_PX_W, TILE_H, TILE_W};
 
 struct Rect {
     x0: i32,
@@ -38,10 +40,10 @@ enum SidebarAction {
     Resign,
 }
 
-fn menu_mode_buttons() -> [(Rect, &'static str, Mode); 3] {
+fn menu_mode_buttons(show_coords: bool) -> [(Rect, &'static str, Mode); 3] {
     let bw = 460;
     let bh = 52;
-    let cx = LOGICAL_W / 2;
+    let cx = render::logical_w(show_coords) / 2;
     let gap = 16;
     let top = 260;
     [
@@ -78,10 +80,10 @@ fn menu_mode_buttons() -> [(Rect, &'static str, Mode); 3] {
     ]
 }
 
-fn menu_resume_button() -> Rect {
+fn menu_resume_button(show_coords: bool) -> Rect {
     let bw = 460;
     let bh = 52;
-    let cx = LOGICAL_W / 2;
+    let cx = render::logical_w(show_coords) / 2;
     let top = 260 + 3 * (bh + 16) + 20;
     Rect {
         x0: cx - bw / 2,
@@ -91,13 +93,13 @@ fn menu_resume_button() -> Rect {
     }
 }
 
-fn choice_buttons(n: usize) -> Vec<Rect> {
+fn choice_buttons(n: usize, show_coords: bool) -> Vec<Rect> {
     let bw = 340;
     let bh = 44;
     let gap = 10;
-    let cx = BOARD_W / 2;
+    let cx = render::board_w(show_coords) / 2;
     let total_h = n as i32 * bh + (n as i32 - 1) * gap;
-    let top = (LOGICAL_H - total_h) / 2;
+    let top = (render::logical_h(show_coords) - total_h) / 2;
     (0..n)
         .map(|i| {
             let y0 = top + i as i32 * (bh + gap);
@@ -116,9 +118,9 @@ const BTN_H: i32 = 28;
 const BTN_GAP: i32 = 6;
 const SIDEBAR_BUTTONS_TOP: i32 = 78;
 
-fn sidebar_button_rect(index: i32) -> Rect {
-    let x0 = BOARD_W + SIDEBAR_PAD;
-    let x1 = LOGICAL_W - SIDEBAR_PAD;
+fn sidebar_button_rect(index: i32, show_coords: bool) -> Rect {
+    let x0 = render::board_w(show_coords) + SIDEBAR_PAD;
+    let x1 = render::logical_w(show_coords) - SIDEBAR_PAD;
     let y0 = SIDEBAR_BUTTONS_TOP + index * (BTN_H + BTN_GAP);
     Rect {
         x0,
@@ -131,19 +133,19 @@ fn sidebar_button_rect(index: i32) -> Rect {
 fn sidebar_buttons(app: &App) -> [(Rect, String, SidebarAction, bool); 6] {
     [
         (
-            sidebar_button_rect(0),
+            sidebar_button_rect(0, app.show_coords),
             "MAIN MENU".to_string(),
             SidebarAction::MainMenu,
             true,
         ),
         (
-            sidebar_button_rect(1),
+            sidebar_button_rect(1, app.show_coords),
             "SWITCH SIDES".to_string(),
             SidebarAction::SwitchSides,
             true,
         ),
         (
-            sidebar_button_rect(2),
+            sidebar_button_rect(2, app.show_coords),
             if app.show_threats {
                 "HIDE THREATS".to_string()
             } else {
@@ -153,7 +155,7 @@ fn sidebar_buttons(app: &App) -> [(Rect, String, SidebarAction, bool); 6] {
             true,
         ),
         (
-            sidebar_button_rect(3),
+            sidebar_button_rect(3, app.show_coords),
             if app.show_coords {
                 "HIDE COORDS".to_string()
             } else {
@@ -163,13 +165,13 @@ fn sidebar_buttons(app: &App) -> [(Rect, String, SidebarAction, bool); 6] {
             true,
         ),
         (
-            sidebar_button_rect(4),
+            sidebar_button_rect(4, app.show_coords),
             "UNDO".to_string(),
             SidebarAction::Undo,
             app.can_undo(),
         ),
         (
-            sidebar_button_rect(5),
+            sidebar_button_rect(5, app.show_coords),
             "RESIGN".to_string(),
             SidebarAction::Resign,
             true,
@@ -180,8 +182,8 @@ fn sidebar_buttons(app: &App) -> [(Rect, String, SidebarAction, bool); 6] {
 const HISTORY_TOP: i32 = 300;
 const HISTORY_ROW_H: i32 = 13;
 
-fn history_visible_rows() -> i32 {
-    (LOGICAL_H - HISTORY_TOP - SIDEBAR_PAD) / HISTORY_ROW_H
+fn history_visible_rows(show_coords: bool) -> i32 {
+    (render::logical_h(show_coords) - HISTORY_TOP - SIDEBAR_PAD) / HISTORY_ROW_H
 }
 
 /// Screen-space (col, row) for a board position, honoring the board flip.
@@ -202,15 +204,28 @@ fn board_pos(col: i32, row: i32, flipped: bool) -> Position {
     }
 }
 
-fn tile_at(lx: i32, ly: i32, flipped: bool) -> Option<Position> {
-    let bx = lx - GUTTER;
-    let by = ly - TOPBAR;
-    if bx < 0 || by < 0 || bx >= BOARD_PX || by >= BOARD_PX {
+fn tile_at(lx: i32, ly: i32, flipped: bool, show_coords: bool) -> Option<Position> {
+    let bx = lx - render::gutter(show_coords);
+    let by = ly - render::topbar(show_coords);
+    if bx < 0 || by < 0 || bx >= BOARD_PX_W || by >= BOARD_PX_H {
         return None;
     }
-    let col = bx / TILE;
-    let row = by / TILE;
+    let col = bx / TILE_W;
+    let row = by / TILE_H;
     Some(board_pos(col, row, flipped))
+}
+
+/// The opponent's pieces are drawn upside down, like a physical two-player
+/// board where each side's own tokens face them. "Opponent" here means
+/// whichever color is rendered at the top of the screen — which flips with
+/// `app.flipped`, not with whose turn it is.
+fn is_upside_down(color: keres_engine::Color, flipped: bool) -> bool {
+    let near_side = if flipped {
+        keres_engine::Color::Black
+    } else {
+        keres_engine::Color::White
+    };
+    color != near_side
 }
 
 fn move_notation(mv: &Move, is_capture: bool) -> String {
@@ -223,29 +238,25 @@ fn move_notation(mv: &Move, is_capture: bool) -> String {
     )
 }
 
-fn draw_menu(c: &mut Canvas) {
-    c.fill_rect(0, 0, LOGICAL_W, LOGICAL_H, render::COL_PAGE_BG);
-    c.draw_text_centered(LOGICAL_W / 2, 60, "KERES", 6, render::COL_STATUS);
+fn draw_menu(c: &mut Canvas, show_coords: bool) {
+    let lw = render::logical_w(show_coords);
+    let lh = render::logical_h(show_coords);
+    c.fill_rect(0, 0, lw, lh, render::COL_PAGE_BG);
+    c.draw_text_centered(lw / 2, 60, "KERES", 6, render::COL_STATUS);
+    c.draw_text_centered(lw / 2, 140, "9X9 STACKING CHESS", 2, render::COL_COORD);
     c.draw_text_centered(
-        LOGICAL_W / 2,
-        140,
-        "9X9 STACKING CHESS",
-        2,
-        render::COL_COORD,
-    );
-    c.draw_text_centered(
-        LOGICAL_W / 2,
+        lw / 2,
         178,
         "CLICK A PIECE, THEN A HIGHLIGHTED TILE",
         1,
         render::COL_COORD,
     );
-    for (rect, label, _) in menu_mode_buttons() {
+    for (rect, label, _) in menu_mode_buttons(show_coords) {
         c.stroke_rect(rect.x0, rect.y0, rect.x1, rect.y1, 2, render::COL_STATUS);
         c.draw_text_centered(rect.cx(), rect.cy() - 5, label, 1, render::COL_STATUS);
     }
     if save::exists() {
-        let rect = menu_resume_button();
+        let rect = menu_resume_button(show_coords);
         c.stroke_rect(rect.x0, rect.y0, rect.x1, rect.y1, 2, render::COL_SELECT);
         c.draw_text_centered(
             rect.cx(),
@@ -255,18 +266,14 @@ fn draw_menu(c: &mut Canvas) {
             render::COL_SELECT,
         );
     }
-    c.draw_text_centered(
-        LOGICAL_W / 2,
-        LOGICAL_H - 30,
-        "ESC TO QUIT",
-        1,
-        render::COL_COORD,
-    );
+    c.draw_text_centered(lw / 2, lh - 30, "ESC TO QUIT", 1, render::COL_COORD);
 }
 
 fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32) {
-    let x0 = BOARD_W;
-    c.fill_rect(x0, 0, LOGICAL_W, LOGICAL_H, render::COL_SIDEBAR_BG);
+    let x0 = render::board_w(app.show_coords);
+    let lw = render::logical_w(app.show_coords);
+    let lh = render::logical_h(app.show_coords);
+    c.fill_rect(x0, 0, lw, lh, render::COL_SIDEBAR_BG);
     c.draw_text(x0 + SIDEBAR_PAD, 14, "KERES", 2, render::COL_STATUS);
 
     let status = if app.ai_thinking {
@@ -295,7 +302,7 @@ fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32) {
     c.stroke_rect(
         x0 + SIDEBAR_PAD,
         HISTORY_TOP - 4,
-        LOGICAL_W - SIDEBAR_PAD,
+        lw - SIDEBAR_PAD,
         HISTORY_TOP - 3,
         1,
         render::COL_COORD,
@@ -307,7 +314,7 @@ fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32) {
         .enumerate()
         .map(|(i, chunk)| (i + 1, chunk.first(), chunk.get(1)))
         .collect();
-    let visible = history_visible_rows();
+    let visible = history_visible_rows(app.show_coords);
     let max_scroll = (pairs.len() as i32 - visible).max(0);
     let scroll = history_scroll.clamp(0, max_scroll);
     for (row, (n, white, black)) in pairs
@@ -331,7 +338,13 @@ fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32) {
 }
 
 fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32) {
-    c.fill_rect(0, 0, LOGICAL_W, LOGICAL_H, render::COL_PAGE_BG);
+    let show_coords = app.show_coords;
+    let gutter = render::gutter(show_coords);
+    let topbar = render::topbar(show_coords);
+    let lw = render::logical_w(show_coords);
+    let lh = render::logical_h(show_coords);
+
+    c.fill_rect(0, 0, lw, lh, render::COL_PAGE_BG);
     draw_sidebar(c, app, history_scroll);
 
     for y in 0..9i32 {
@@ -342,61 +355,107 @@ fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32) {
             } else {
                 render::COL_DARK_SQ
             };
-            let px0 = GUTTER + x * TILE;
-            let py0 = TOPBAR + y * TILE;
-            c.fill_rect(px0, py0, px0 + TILE, py0 + TILE, color);
+            let px0 = gutter + x * TILE_W;
+            let py0 = topbar + y * TILE_H;
+            c.fill_rect(px0, py0, px0 + TILE_W, py0 + TILE_H, color);
         }
+    }
+
+    // Tile-highlight overlays, palette matched to the Web platform (see
+    // render::COL_HL_*): a full-tile alpha wash rather than a dot/ring.
+    // Layered weakest to strongest so a stronger highlight always wins where
+    // they'd otherwise overlap.
+    for pos in app.hover_threat_squares() {
+        let (cx, cy) = screen_coord(pos, app.flipped);
+        let px0 = gutter + cx * TILE_W;
+        let py0 = topbar + cy * TILE_H;
+        c.fill_rect_alpha(
+            px0,
+            py0,
+            px0 + TILE_W,
+            py0 + TILE_H,
+            render::COL_HL_THREAT,
+            render::COL_HL_THREAT_A,
+        );
+    }
+
+    for pos in app.hover_preview_squares() {
+        let (cx, cy) = screen_coord(pos, app.flipped);
+        let px0 = gutter + cx * TILE_W;
+        let py0 = topbar + cy * TILE_H;
+        c.fill_rect_alpha(
+            px0,
+            py0,
+            px0 + TILE_W,
+            py0 + TILE_H,
+            render::COL_HL_HOVER,
+            render::COL_HL_HOVER_A,
+        );
     }
 
     if let Some(sel) = app.selected {
         let (cx, cy) = screen_coord(sel, app.flipped);
-        let px0 = GUTTER + cx * TILE;
-        let py0 = TOPBAR + cy * TILE;
-        c.stroke_rect(px0, py0, px0 + TILE, py0 + TILE, 4, render::COL_SELECT);
+        let px0 = gutter + cx * TILE_W;
+        let py0 = topbar + cy * TILE_H;
+        c.fill_rect_alpha(
+            px0,
+            py0,
+            px0 + TILE_W,
+            py0 + TILE_H,
+            render::COL_HL_SELECTED,
+            render::COL_HL_SELECTED_A,
+        );
     }
 
-    for (pos, is_capture) in app.target_squares() {
+    for (pos, _is_capture) in app.target_squares() {
         let (cx, cy) = screen_coord(pos, app.flipped);
-        let px0 = GUTTER + cx * TILE;
-        let py0 = TOPBAR + cy * TILE;
-        if is_capture {
-            c.stroke_rect(
-                px0 + 2,
-                py0 + 2,
-                px0 + TILE - 2,
-                py0 + TILE - 2,
-                3,
-                render::COL_CAPTURE_RING,
-            );
-        } else {
-            c.fill_ellipse(
-                px0 + TILE / 2,
-                py0 + TILE / 2,
-                8,
-                8,
-                None,
-                render::COL_MOVE_DOT,
-            );
-        }
+        let px0 = gutter + cx * TILE_W;
+        let py0 = topbar + cy * TILE_H;
+        c.fill_rect_alpha(
+            px0,
+            py0,
+            px0 + TILE_W,
+            py0 + TILE_H,
+            render::COL_HL_POTENTIAL,
+            render::COL_HL_POTENTIAL_A,
+        );
     }
 
-    if app.show_threats {
-        for pos in app.threatened_squares() {
-            let (cx, cy) = screen_coord(pos, app.flipped);
-            let px0 = GUTTER + cx * TILE;
-            let py0 = TOPBAR + cy * TILE;
-            c.fill_ellipse(px0 + TILE - 10, py0 + 10, 6, 6, None, render::COL_THREAT);
-        }
-    }
-
-    for y in 0..9usize {
-        for x in 0..9usize {
-            if let Some(piece) = app.game.board.get_piece(&Position::new(x, y)) {
-                let (cx, cy) = screen_coord(Position::new(x, y), app.flipped);
-                let px = GUTTER + cx * TILE + TILE / 2;
-                let py = TOPBAR + cy * TILE + TILE / 2;
-                render::draw_piece(c, px, py, piece as &Piece);
+    // Pieces are drawn in screen-row order (top to bottom), not board-row
+    // order — the two differ once the board is flipped (see `board_pos`).
+    // This is what a stack's overflow-above-the-tile art (see
+    // `render::draw_piece`) relies on: a lower screen row is always drawn
+    // after the row above it, so its stack correctly paints over that row's
+    // content instead of being painted over by it.
+    for sy in 0..9i32 {
+        for sx in 0..9i32 {
+            let board_p = board_pos(sx, sy, app.flipped);
+            if let Some(piece) = app.game.board.get_piece(&board_p) {
+                let tx = gutter + sx * TILE_W;
+                let ty = topbar + sy * TILE_H;
+                let upside_down = is_upside_down(piece.color, app.flipped);
+                render::draw_piece(c, tx, ty, piece as &Piece, upside_down);
             }
+        }
+    }
+
+    // Big "this creates a stack" arrow: when a piece is selected and the
+    // hovered square is a legal stacking target (a friendly piece it could
+    // land on), it's ambiguous whether clicking merges the stack or just
+    // reselects — the arrow makes the stacking outcome unmistakable. Drawn
+    // last so it sits on top of the square and piece underneath it.
+    if app.hovered_stack_target() {
+        if let Some(pos) = app.hovered {
+            let (cx, cy) = screen_coord(pos, app.flipped);
+            let tx = gutter + cx * TILE_W;
+            let ty = topbar + cy * TILE_H;
+            c.draw_bitmap(
+                tx + 22,
+                ty - 7,
+                &symbols::symbol_bits(symbols::Symbol::DownArrow),
+                symbols::SYMBOL_W as i32,
+                render::COL_HL_THREAT,
+            );
         }
     }
 
@@ -406,7 +465,7 @@ fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32) {
             let rank = 9 - y;
             c.draw_text(
                 6,
-                TOPBAR + sy * TILE + TILE / 2 - 5,
+                topbar + sy * TILE_H + TILE_H / 2 - 5,
                 &rank.to_string(),
                 1,
                 render::COL_COORD,
@@ -416,8 +475,8 @@ fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32) {
             let (sx, _) = screen_coord(Position::new(x as usize, 0), app.flipped);
             let file = ((b'A' + x as u8) as char).to_string();
             c.draw_text_centered(
-                GUTTER + sx * TILE + TILE / 2,
-                TOPBAR + BOARD_PX + 8,
+                gutter + sx * TILE_W + TILE_W / 2,
+                topbar + BOARD_PX_H + 8,
                 &file,
                 1,
                 render::COL_COORD,
@@ -426,8 +485,8 @@ fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32) {
     }
 
     if let Some(pending) = &app.pending {
-        c.fill_rect_alpha(0, 0, BOARD_W, LOGICAL_H, 0x000000, 0.72);
-        let rects = choice_buttons(pending.options.len());
+        c.fill_rect_alpha(0, 0, render::board_w(show_coords), lh, 0x000000, 0.72);
+        let rects = choice_buttons(pending.options.len(), show_coords);
         for (i, mv) in pending.options.iter().enumerate() {
             let rect = &rects[i];
             c.stroke_rect(rect.x0, rect.y0, rect.x1, rect.y1, 2, render::COL_STATUS);
@@ -439,7 +498,9 @@ fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32) {
 
 fn draw_game_over(c: &mut Canvas, app: &App, history_scroll: i32) {
     draw_board(c, app, history_scroll);
-    c.fill_rect_alpha(0, 0, BOARD_W, LOGICAL_H, 0x000000, 0.72);
+    let board_w = render::board_w(app.show_coords);
+    let lh = render::logical_h(app.show_coords);
+    c.fill_rect_alpha(0, 0, board_w, lh, 0x000000, 0.72);
     let msg = if app.game.is_draw() {
         "DRAW"
     } else if app.game.white_wins() {
@@ -447,10 +508,10 @@ fn draw_game_over(c: &mut Canvas, app: &App, history_scroll: i32) {
     } else {
         "BLACK WINS"
     };
-    c.draw_text_centered(BOARD_W / 2, LOGICAL_H / 2 - 40, msg, 4, render::COL_STATUS);
+    c.draw_text_centered(board_w / 2, lh / 2 - 40, msg, 4, render::COL_STATUS);
     c.draw_text_centered(
-        BOARD_W / 2,
-        LOGICAL_H / 2 + 30,
+        board_w / 2,
+        lh / 2 + 30,
         "CLICK TO RETURN TO MENU",
         1,
         render::COL_COORD,
@@ -472,11 +533,10 @@ fn write_ppm(path: &str, buf: &[u32], w: i32, h: i32) {
 
 /// Headless render-to-file path used only for local visual verification
 /// (`KERES_SNAPSHOT=<path>.ppm KERES_SCREEN=menu|playing|selected|stacked|
-/// gameover|flipped|threats|sidebar_full`). Never touches a window or the
-/// real display.
+/// gameover|flipped|threats|history|nocoords|hover_friendly|hover_threat|
+/// hover_stack`). Never touches a window or the real display.
 fn run_snapshot(path: &str) {
     use keres_engine::{Board, Color, PieceType};
-    let mut buffer = vec![0u32; (LOGICAL_W * LOGICAL_H) as usize];
     let mut app = App::new();
     let screen = std::env::var("KERES_SCREEN").unwrap_or_else(|_| "menu".to_string());
     match screen.as_str() {
@@ -557,19 +617,75 @@ fn run_snapshot(path: &str) {
                 app.history.push((mv, cap));
             }
         }
+        "nocoords" => {
+            app.start_game(Mode::Hotseat);
+            app.toggle_coords();
+        }
+        "hover_friendly" => {
+            app.start_game(Mode::Hotseat);
+            app.set_hovered(Some(Position::new(3, 6)));
+        }
+        "hover_threat" => {
+            app.start_game(Mode::Hotseat);
+            let mut board = Board::empty();
+            board.set_piece(
+                &Position::new(4, 8),
+                Some(Piece::new(Color::White, PieceType::King, None)),
+            );
+            board.set_piece(
+                &Position::new(4, 0),
+                Some(Piece::new(Color::Black, PieceType::King, None)),
+            );
+            board.set_piece(
+                &Position::new(4, 4),
+                Some(Piece::new(Color::White, PieceType::Soldier, None)),
+            );
+            board.set_piece(
+                &Position::new(3, 3),
+                Some(Piece::new(Color::Black, PieceType::Bishop, None)),
+            );
+            app.game.board = board;
+            app.set_hovered(Some(Position::new(3, 3)));
+        }
+        "hover_stack" => {
+            app.start_game(Mode::Hotseat);
+            let mut board = Board::empty();
+            board.set_piece(
+                &Position::new(4, 8),
+                Some(Piece::new(Color::White, PieceType::King, None)),
+            );
+            board.set_piece(
+                &Position::new(4, 0),
+                Some(Piece::new(Color::Black, PieceType::King, None)),
+            );
+            board.set_piece(
+                &Position::new(4, 4),
+                Some(Piece::new(Color::White, PieceType::Rook, None)),
+            );
+            board.set_piece(
+                &Position::new(4, 3),
+                Some(Piece::new(Color::White, PieceType::Soldier, None)),
+            );
+            app.game.board = board;
+            app.click_square(Position::new(4, 4));
+            app.set_hovered(Some(Position::new(4, 3)));
+        }
         other => panic!("unknown KERES_SCREEN {other}"),
     }
+    let lw = render::logical_w(app.show_coords);
+    let lh = render::logical_h(app.show_coords);
+    let mut buffer = vec![0u32; (lw * lh) as usize];
     let mut canvas = Canvas {
         buf: &mut buffer,
-        w: LOGICAL_W,
-        h: LOGICAL_H,
+        w: lw,
+        h: lh,
     };
     match app.screen {
-        Screen::Menu => draw_menu(&mut canvas),
+        Screen::Menu => draw_menu(&mut canvas, app.show_coords),
         Screen::Playing => draw_board(&mut canvas, &app, 0),
         Screen::GameOver => draw_game_over(&mut canvas, &app, 0),
     }
-    write_ppm(path, &buffer, LOGICAL_W, LOGICAL_H);
+    write_ppm(path, &buffer, lw, lh);
 }
 
 fn main() {
@@ -578,10 +694,12 @@ fn main() {
         return;
     }
 
+    let mut app = App::new();
+
     let mut window = Window::new(
         "Keres",
-        LOGICAL_W as usize,
-        LOGICAL_H as usize,
+        render::logical_w(app.show_coords) as usize,
+        render::logical_h(app.show_coords) as usize,
         WindowOptions {
             resize: true,
             ..WindowOptions::default()
@@ -590,14 +708,20 @@ fn main() {
     .expect("unable to open window");
     window.set_target_fps(60);
 
-    let mut logical = vec![0u32; (LOGICAL_W * LOGICAL_H) as usize];
+    let mut logical: Vec<u32> = Vec::new();
     let mut output: Vec<u32> = Vec::new();
-    let mut app = App::new();
     let mut prev_mouse_down = false;
     let mut history_scroll: i32 = 0;
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
         app.poll_ai();
+
+        let show_coords = app.show_coords;
+        let lw = render::logical_w(show_coords);
+        let lh = render::logical_h(show_coords);
+        if logical.len() != (lw * lh) as usize {
+            logical.resize((lw * lh) as usize, 0);
+        }
 
         let (win_w, win_h) = window.get_size();
         let (win_w, win_h) = (win_w as i32, win_h as i32);
@@ -606,8 +730,21 @@ fn main() {
         let clicked = mouse_down && !prev_mouse_down;
         prev_mouse_down = mouse_down;
         let mouse_pos = window.get_mouse_pos(MouseMode::Clamp);
-        let logical_mouse = mouse_pos
-            .and_then(|(mx, my)| render::window_to_logical(mx as i32, my as i32, win_w, win_h));
+        let logical_mouse = mouse_pos.and_then(|(mx, my)| {
+            render::window_to_logical(mx as i32, my as i32, win_w, win_h, lw, lh)
+        });
+
+        // Live hover tracking drives the immediate move preview and the
+        // "this creates a stack" arrow (see App::hover_preview_squares /
+        // hovered_stack_target) — only meaningful while a move can actually
+        // be made.
+        if app.screen == Screen::Playing && !app.ai_thinking && app.pending.is_none() {
+            let hovered =
+                logical_mouse.and_then(|(lx, ly)| tile_at(lx, ly, app.flipped, show_coords));
+            app.set_hovered(hovered);
+        } else {
+            app.set_hovered(None);
+        }
 
         if let Some((_, dy)) = window.get_scroll_wheel() {
             if app.screen == Screen::Playing && dy.abs() > 0.01 {
@@ -621,7 +758,7 @@ fn main() {
                 match app.screen {
                     Screen::Menu => {
                         let mut handled = false;
-                        for (rect, _label, mode) in menu_mode_buttons() {
+                        for (rect, _label, mode) in menu_mode_buttons(show_coords) {
                             if rect.contains(lx, ly) {
                                 app.start_game(mode);
                                 history_scroll = 0;
@@ -629,7 +766,10 @@ fn main() {
                                 break;
                             }
                         }
-                        if !handled && save::exists() && menu_resume_button().contains(lx, ly) {
+                        if !handled
+                            && save::exists()
+                            && menu_resume_button(show_coords).contains(lx, ly)
+                        {
                             if let Some((mode, moves)) = save::load() {
                                 app.resume_game(mode, moves);
                                 history_scroll = 0;
@@ -638,7 +778,7 @@ fn main() {
                     }
                     Screen::Playing => {
                         if let Some(pending) = &app.pending {
-                            let rects = choice_buttons(pending.options.len());
+                            let rects = choice_buttons(pending.options.len(), show_coords);
                             for (i, rect) in rects.iter().enumerate() {
                                 if rect.contains(lx, ly) {
                                     app.resolve_choice(i);
@@ -662,7 +802,7 @@ fn main() {
                                 }
                             }
                             if !handled {
-                                if let Some(pos) = tile_at(lx, ly, app.flipped) {
+                                if let Some(pos) = tile_at(lx, ly, app.flipped, show_coords) {
                                     app.click_square(pos);
                                 }
                             }
@@ -712,11 +852,11 @@ fn main() {
 
         let mut canvas = Canvas {
             buf: &mut logical,
-            w: LOGICAL_W,
-            h: LOGICAL_H,
+            w: lw,
+            h: lh,
         };
         match app.screen {
-            Screen::Menu => draw_menu(&mut canvas),
+            Screen::Menu => draw_menu(&mut canvas, show_coords),
             Screen::Playing => draw_board(&mut canvas, &app, history_scroll),
             Screen::GameOver => draw_game_over(&mut canvas, &app, history_scroll),
         }
@@ -725,7 +865,7 @@ fn main() {
         if output.len() != out_len {
             output.resize(out_len, 0);
         }
-        render::blit_to_window(&logical, &mut output, win_w.max(1), win_h.max(1));
+        render::blit_to_window(&logical, &mut output, win_w.max(1), win_h.max(1), lw, lh);
 
         window
             .update_with_buffer(&output, win_w.max(1) as usize, win_h.max(1) as usize)

@@ -1,21 +1,58 @@
 //! Software rasterizer: framebuffer primitives, bitmap font blitting and
 //! piece-sprite composition (background/border/icon/text layers).
 
+use crate::base;
 use crate::font;
 use crate::icons::{self, PieceIcon};
 use keres_engine::{Color, Piece, PieceType};
 
-pub const TILE: i32 = 72;
-pub const GUTTER: i32 = 26;
-pub const TOPBAR: i32 = 20;
-pub const BOARD_PX: i32 = TILE * 9;
+/// Board square width/height. Rectangular (not square) on purpose — it
+/// matches the aspect ratio of the hand-drawn base plaque (see `draw_piece`).
+pub const TILE_W: i32 = 67;
+pub const TILE_H: i32 = 56;
+pub const BOARD_PX_W: i32 = TILE_W * 9;
+pub const BOARD_PX_H: i32 = TILE_H * 9;
 pub const SIDEBAR_W: i32 = 300;
-pub const BOARD_W: i32 = GUTTER + BOARD_PX;
-/// Fixed logical canvas the whole UI is drawn into. The window itself can
-/// be resized freely; `blit_to_window` nearest-neighbor scales this canvas
-/// into the real framebuffer so pixel art never blurs or stretches.
-pub const LOGICAL_W: i32 = BOARD_W + SIDEBAR_W;
-pub const LOGICAL_H: i32 = TOPBAR + BOARD_PX + GUTTER;
+
+/// Left/bottom rank-and-file coordinate margin. Collapses to 0 when
+/// coordinates are hidden, so the board fills that space instead of leaving
+/// it as empty background — see `logical_w`/`logical_h`.
+pub fn gutter(show_coords: bool) -> i32 {
+    if show_coords {
+        26
+    } else {
+        0
+    }
+}
+
+/// Margin above the board; collapses together with `gutter` when
+/// coordinates are hidden.
+pub fn topbar(show_coords: bool) -> i32 {
+    if show_coords {
+        20
+    } else {
+        0
+    }
+}
+
+pub fn board_w(show_coords: bool) -> i32 {
+    gutter(show_coords) + BOARD_PX_W
+}
+
+/// The whole UI is drawn into a logical framebuffer this size, not the real
+/// window buffer. The window itself can be resized freely; `blit_to_window`
+/// nearest-neighbor scales this canvas into the real framebuffer so pixel
+/// art never blurs or stretches. It shrinks when coordinates are hidden
+/// (no gutter/topbar margin), which is what makes the board render bigger
+/// on screen in that mode: the same physical window scales a smaller
+/// canvas up further.
+pub fn logical_w(show_coords: bool) -> i32 {
+    board_w(show_coords) + SIDEBAR_W
+}
+
+pub fn logical_h(show_coords: bool) -> i32 {
+    topbar(show_coords) + BOARD_PX_H + gutter(show_coords)
+}
 
 pub const COL_PAGE_BG: u32 = 0x14140f;
 pub const COL_LIGHT_SQ: u32 = 0xefe3c8;
@@ -23,11 +60,23 @@ pub const COL_DARK_SQ: u32 = 0xc79a58;
 pub const COL_COORD: u32 = 0x9c8a63;
 pub const COL_STATUS: u32 = 0xe8dcc0;
 pub const COL_SELECT: u32 = 0xe0913c;
-pub const COL_MOVE_DOT: u32 = 0x4fae5a;
-pub const COL_CAPTURE_RING: u32 = 0xcf4b4b;
-pub const COL_THREAT: u32 = 0xff5a3c;
 pub const COL_SIDEBAR_BG: u32 = 0x1c1b16;
 pub const COL_BTN_DISABLED: u32 = 0x5a5346;
+
+// Board tile-highlight palette, matched to the Web platform's SVG board
+// (see keres-platform's SVGBoardView.ts / GameController.updateOverlays) so
+// the native and Web clients read the same way. Each is a full-tile alpha
+// wash rather than a dot/ring, again mirroring the Web renderer.
+pub const COL_HL_SELECTED: u32 = 0x7fa0dd;
+pub const COL_HL_SELECTED_A: f32 = 0.6;
+pub const COL_HL_POTENTIAL: u32 = 0x55d157;
+pub const COL_HL_POTENTIAL_A: f32 = 0.5;
+/// Also used for the "this creates a stack" hover arrow (see
+/// `App::hovered_stack_target`) — same gold as the hover-preview wash.
+pub const COL_HL_HOVER: u32 = 0xe1ca58;
+pub const COL_HL_HOVER_A: f32 = 0.4;
+pub const COL_HL_THREAT: u32 = 0xff4444;
+pub const COL_HL_THREAT_A: f32 = 0.5;
 
 pub const COIN_WHITE: u32 = 0xf3ead2;
 pub const COIN_BLACK: u32 = 0x1c1a16;
@@ -75,73 +124,6 @@ impl<'a> Canvas<'a> {
         self.fill_rect(x1 - thickness, y0, x1, y1, color);
     }
 
-    /// Fill an axis-aligned ellipse. `half`: None = full, Some(true) = bottom
-    /// half only (dy >= 0), Some(false) = top half only (dy <= 0).
-    pub fn fill_ellipse(
-        &mut self,
-        cx: i32,
-        cy: i32,
-        rx: i32,
-        ry: i32,
-        half: Option<bool>,
-        color: u32,
-    ) {
-        for y in (cy - ry).max(0)..=(cy + ry).min(self.h - 1) {
-            let dy = y - cy;
-            if let Some(bottom) = half {
-                if bottom && dy < 0 {
-                    continue;
-                }
-                if !bottom && dy > 0 {
-                    continue;
-                }
-            }
-            for x in (cx - rx).max(0)..=(cx + rx).min(self.w - 1) {
-                let dx = x - cx;
-                let v = (dx * dx) as f32 / (rx * rx) as f32 + (dy * dy) as f32 / (ry * ry) as f32;
-                if v <= 1.0 {
-                    self.put(x, y, color);
-                }
-            }
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn stroke_ellipse(
-        &mut self,
-        cx: i32,
-        cy: i32,
-        rx: i32,
-        ry: i32,
-        thickness: i32,
-        half: Option<bool>,
-        color: u32,
-    ) {
-        let irx = (rx - thickness).max(0);
-        let iry = (ry - thickness).max(0);
-        for y in (cy - ry).max(0)..=(cy + ry).min(self.h - 1) {
-            let dy = y - cy;
-            if let Some(bottom) = half {
-                if bottom && dy < 0 {
-                    continue;
-                }
-                if !bottom && dy > 0 {
-                    continue;
-                }
-            }
-            for x in (cx - rx).max(0)..=(cx + rx).min(self.w - 1) {
-                let dx = x - cx;
-                let outer =
-                    (dx * dx) as f32 / (rx * rx) as f32 + (dy * dy) as f32 / (ry * ry) as f32;
-                let inner = (dx * dx) as f32 / (irx * irx).max(1) as f32
-                    + (dy * dy) as f32 / (iry * iry).max(1) as f32;
-                if outer <= 1.0 && inner > 1.0 {
-                    self.put(x, y, color);
-                }
-            }
-        }
-    }
-
     /// Draw one font glyph at integer `scale`, top-left corner at (x, y).
     pub fn draw_glyph(&mut self, x: i32, y: i32, ch: char, scale: i32, color: u32) {
         let rows = font::glyph(ch);
@@ -178,18 +160,47 @@ impl<'a> Canvas<'a> {
         self.draw_text(cx - w / 2, y, text, scale, color);
     }
 
-    /// Draw a piece icon mask centered at (cx, cy) with integer `scale`.
-    pub fn draw_icon(&mut self, cx: i32, cy: i32, icon: PieceIcon, scale: i32, color: u32) {
+    /// Draw a piece icon mask with its top-left corner at (x0, y0), at
+    /// integer `scale`. `rotate180` samples the mask back-to-front in both
+    /// axes (about its own center, so the bounding box at (x0, y0) is
+    /// unchanged) — used to draw the opponent's icon upside down.
+    pub fn draw_icon(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        icon: PieceIcon,
+        scale: i32,
+        color: u32,
+        rotate180: bool,
+    ) {
         let bits = icons::icon_bits(icon);
         let n = icons::ICON_N as i32;
-        let ox = cx - (n * scale) / 2;
-        let oy = cy - (n * scale) / 2;
-        for (ry, row) in bits.iter().enumerate() {
+        for ry in 0..n {
+            let row = if rotate180 {
+                bits[(n - 1 - ry) as usize]
+            } else {
+                bits[ry as usize]
+            };
             for cxi in 0..n {
-                if (row >> (n - 1 - cxi)) & 1 == 1 {
-                    let px = ox + cxi * scale;
-                    let py = oy + (ry as i32) * scale;
+                let src_col = if rotate180 { n - 1 - cxi } else { cxi };
+                if (row >> (n - 1 - src_col)) & 1 == 1 {
+                    let px = x0 + cxi * scale;
+                    let py = y0 + ry * scale;
                     self.fill_rect(px, py, px + scale, py + scale, color);
+                }
+            }
+        }
+    }
+
+    /// Draw an arbitrary 1-bit bitmap (see `symbols::symbol_bits`) with its
+    /// top-left corner at `(x0, y0)`, one bitmap pixel = one canvas pixel.
+    /// `width` bits per row, bit `width - 1` = leftmost column (same packing
+    /// as `draw_icon`).
+    pub fn draw_bitmap(&mut self, x0: i32, y0: i32, bits: &[u32], width: i32, color: u32) {
+        for (ry, row) in bits.iter().enumerate() {
+            for cx in 0..width {
+                if (row >> (width - 1 - cx)) & 1 == 1 {
+                    self.put(x0 + cx, y0 + ry as i32, color);
                 }
             }
         }
@@ -222,62 +233,132 @@ pub fn letter_for(pt: PieceType) -> char {
     }
 }
 
-/// Draw a single piece token centered at (cx, cy) — the cylinder body
-/// (background mask), its border (mask, color depends on piece color),
-/// the icon mask and the shortened-notation text mask.
-pub fn draw_piece(canvas: &mut Canvas, cx: i32, cy: i32, piece: &Piece) {
-    let is_white = piece.color == Color::White;
-    let bg = if is_white { COIN_WHITE } else { COIN_BLACK };
-    let border = if is_white {
-        BORDER_ON_WHITE
-    } else {
-        BORDER_ON_BLACK
-    };
-    let fg = if is_white { FG_ON_WHITE } else { FG_ON_BLACK };
+// Piece-token layout, all in tile-local pixels (origin = tile's top-left
+// corner). The base plaque is drawn from two mirrored halves of the
+// `base::BASE_W` x `base::BASE_H` artwork with a 1px seam at the tile's
+// horizontal center; icon and letter are then stamped on top of it. These
+// numbers come directly from the art (see docs/GUI.md) — if the base
+// artwork or TILE_W/TILE_H ever change, re-derive them together.
+const BASE_LEFT_X: i32 = 5;
+const BASE_TOP_Y: i32 = 5;
+const ICON_X: i32 = 21;
+const ICON_Y: i32 = 9;
+const LETTER_BOX_X: i32 = 27;
+const LETTER_BOX_Y: i32 = 37;
+const LETTER_BOX_W: i32 = 13;
+const LETTER_BOX_H: i32 = 12;
 
-    let rx = 32;
-    let ry = 22;
-    let lip = 9;
-    let lip_ry = ry - 5;
-
-    // Background mask, bottom lip (cylinder side), drawn first so the main
-    // face overlaps its top half and only the bottom sliver peeks out.
-    canvas.fill_ellipse(cx, cy + lip, rx, lip_ry, Some(true), bg);
-    canvas.stroke_ellipse(cx, cy + lip, rx, lip_ry, 2, Some(true), border);
-
-    // Background mask, main face.
-    canvas.fill_ellipse(cx, cy, rx, ry, None, bg);
-    canvas.stroke_ellipse(cx, cy, rx, ry, 2, None, border);
-
-    // Icon mask: the top piece represents a stack visually.
-    let icon_piece = piece.top.unwrap_or(piece.bottom);
-    canvas.draw_icon(cx, cy - 3, icon_for(icon_piece), 2, fg);
-
-    // Text mask: shortened notation, e.g. "K" or "B/S" when stacked.
-    let mut label = String::new();
-    if let Some(top) = piece.top {
-        label.push(letter_for(top));
-        label.push('/');
+/// Draw one mirrored-pair half of the base plaque's bitmask with its
+/// top-left corner at `(x0, y0)`. `flip` reads the source columns
+/// back-to-front, which is how the right half is produced from the same
+/// artwork as the left half. `mask` marks which pixels belong to the piece
+/// at all — the plaque isn't a solid rectangle, so a masked-off pixel is
+/// left untouched (the square's own background shows through) rather than
+/// painted `off_color`. `on_color`/`off_color` are which color each
+/// `bits` mask bit paints where the mask allows drawing — see `draw_base`
+/// for why that mapping is inverted between the white and black assets.
+#[allow(clippy::too_many_arguments)]
+fn draw_base_half(
+    canvas: &mut Canvas,
+    x0: i32,
+    y0: i32,
+    bits: &[u32; base::BASE_H],
+    mask: &[u32; base::BASE_H],
+    flip: bool,
+    on_color: u32,
+    off_color: u32,
+) {
+    let w = base::BASE_W as i32;
+    for (row, (bitrow, maskrow)) in bits.iter().zip(mask.iter()).enumerate() {
+        for col in 0..w {
+            let src_col = if flip { w - 1 - col } else { col };
+            let bit = w - 1 - src_col;
+            if (maskrow >> bit) & 1 == 0 {
+                continue;
+            }
+            let on = (bitrow >> bit) & 1 == 1;
+            let color = if on { on_color } else { off_color };
+            canvas.put(x0 + col, y0 + row as i32, color);
+        }
     }
-    label.push(letter_for(piece.bottom));
-    let tw = Canvas::text_width(&label, 1);
-    let ty = cy + ry + lip - 9;
-    canvas.fill_rect(
-        cx - tw / 2 - 2,
-        ty - 1,
-        cx + tw / 2 + 2,
-        ty + font::FONT_H as i32,
-        bg,
+}
+
+/// Draw the full base plaque (both mirrored halves) for one color at
+/// tile-local origin. Both `base::BASE_WHITE` and `base::BASE_BLACK` are
+/// plain on/off masks, but which mask value means "fill" vs. "border ink"
+/// is flipped between them: the white asset is mostly background with a
+/// thin dark ink stroke (mask bit = ink), while the black asset is mostly
+/// filled with a thin light stroke (mask bit = fill). See docs/GUI.md.
+fn draw_base(canvas: &mut Canvas, tx: i32, ty: i32, is_white: bool) {
+    let (bits, on_color, off_color) = if is_white {
+        (&base::BASE_WHITE, BORDER_ON_WHITE, COIN_WHITE)
+    } else {
+        (&base::BASE_BLACK, COIN_BLACK, BORDER_ON_BLACK)
+    };
+    let mask = &base::BASE_MASK;
+    let w = base::BASE_W as i32;
+    draw_base_half(
+        canvas,
+        tx + BASE_LEFT_X,
+        ty + BASE_TOP_Y,
+        bits,
+        mask,
+        false,
+        on_color,
+        off_color,
     );
-    canvas.stroke_rect(
-        cx - tw / 2 - 2,
-        ty - 1,
-        cx + tw / 2 + 2,
-        ty + font::FONT_H as i32,
-        1,
-        border,
+    draw_base_half(
+        canvas,
+        tx + BASE_LEFT_X + w - 1,
+        ty + BASE_TOP_Y,
+        bits,
+        mask,
+        true,
+        on_color,
+        off_color,
     );
-    canvas.draw_text_centered(cx, ty, &label, 1, fg);
+}
+
+/// Draw one full piece token — base plaque, icon and one-letter notation —
+/// at tile-local origin `(tx, ty)`. Only the icon is affected by
+/// `upside_down`: the opponent's icon is rotated 180 degrees in place (see
+/// `Canvas::draw_icon`) so it doesn't read as the near side's pictogram at
+/// a glance, while the plaque and letter stay identical either way.
+fn draw_token(
+    canvas: &mut Canvas,
+    tx: i32,
+    ty: i32,
+    pt: PieceType,
+    is_white: bool,
+    upside_down: bool,
+) {
+    let fg = if is_white { FG_ON_WHITE } else { FG_ON_BLACK };
+    draw_base(canvas, tx, ty, is_white);
+    canvas.draw_icon(tx + ICON_X, ty + ICON_Y, icon_for(pt), 1, fg, upside_down);
+    let letter_cx = tx + LETTER_BOX_X + LETTER_BOX_W / 2;
+    let letter_y = ty + LETTER_BOX_Y + (LETTER_BOX_H - font::FONT_H as i32) / 2;
+    canvas.draw_text_centered(letter_cx, letter_y, &letter_for(pt).to_string(), 1, fg);
+}
+
+/// Draw a piece (lone or stacked) with its token(s) positioned at tile-local
+/// origin `(tx, ty)` — i.e. the tile's top-left corner, not its center; the
+/// base plaque's own margins center it within the tile. `upside_down` marks
+/// the opponent's pieces (see `draw_token`).
+///
+/// A stack draws the bottom piece's full token first, then the top piece's
+/// token shifted up just enough to cover everything above the bottom
+/// piece's letter box while leaving that letter box itself visible — so
+/// the bottom piece stays identifiable by its notation, peeking out from
+/// under the top piece, which is free to overflow into the square above.
+pub fn draw_piece(canvas: &mut Canvas, tx: i32, ty: i32, piece: &Piece, upside_down: bool) {
+    let is_white = piece.color == Color::White;
+    if let Some(top) = piece.top {
+        draw_token(canvas, tx, ty, piece.bottom, is_white, upside_down);
+        let stack_shift = BASE_TOP_Y + base::BASE_H as i32 - LETTER_BOX_Y;
+        draw_token(canvas, tx, ty - stack_shift, top, is_white, upside_down);
+    } else {
+        draw_token(canvas, tx, ty, piece.bottom, is_white, upside_down);
+    }
 }
 
 fn blend(base: u32, overlay: u32, alpha: f32) -> u32 {
@@ -294,12 +375,19 @@ fn blend(base: u32, overlay: u32, alpha: f32) -> u32 {
 /// Nearest-neighbor blit of the fixed logical framebuffer into an
 /// arbitrarily sized output buffer, preserving aspect ratio via letterbox
 /// bars so pixel art is scaled crisply instead of blurred or stretched.
-pub fn blit_to_window(logical: &[u32], out: &mut [u32], out_w: i32, out_h: i32) {
-    let scale = (out_w as f32 / LOGICAL_W as f32)
-        .min(out_h as f32 / LOGICAL_H as f32)
+pub fn blit_to_window(
+    logical: &[u32],
+    out: &mut [u32],
+    out_w: i32,
+    out_h: i32,
+    logical_w: i32,
+    logical_h: i32,
+) {
+    let scale = (out_w as f32 / logical_w as f32)
+        .min(out_h as f32 / logical_h as f32)
         .max(0.05);
-    let draw_w = (LOGICAL_W as f32 * scale) as i32;
-    let draw_h = (LOGICAL_H as f32 * scale) as i32;
+    let draw_w = (logical_w as f32 * scale) as i32;
+    let draw_h = (logical_h as f32 * scale) as i32;
     let off_x = (out_w - draw_w) / 2;
     let off_y = (out_h - draw_h) / 2;
     for y in 0..out_h {
@@ -311,21 +399,28 @@ pub fn blit_to_window(logical: &[u32], out: &mut [u32], out_w: i32, out_h: i32) 
             }
             let sx = (((x - off_x) as f32) / scale) as i32;
             let sy = (((y - off_y) as f32) / scale) as i32;
-            let sx = sx.clamp(0, LOGICAL_W - 1);
-            let sy = sy.clamp(0, LOGICAL_H - 1);
-            out[idx] = logical[(sy * LOGICAL_W + sx) as usize];
+            let sx = sx.clamp(0, logical_w - 1);
+            let sy = sy.clamp(0, logical_h - 1);
+            out[idx] = logical[(sy * logical_w + sx) as usize];
         }
     }
 }
 
 /// Map a real window mouse position back into logical canvas coordinates,
 /// inverse of `blit_to_window`. Returns None inside the letterbox margin.
-pub fn window_to_logical(mx: i32, my: i32, out_w: i32, out_h: i32) -> Option<(i32, i32)> {
-    let scale = (out_w as f32 / LOGICAL_W as f32)
-        .min(out_h as f32 / LOGICAL_H as f32)
+pub fn window_to_logical(
+    mx: i32,
+    my: i32,
+    out_w: i32,
+    out_h: i32,
+    logical_w: i32,
+    logical_h: i32,
+) -> Option<(i32, i32)> {
+    let scale = (out_w as f32 / logical_w as f32)
+        .min(out_h as f32 / logical_h as f32)
         .max(0.05);
-    let draw_w = (LOGICAL_W as f32 * scale) as i32;
-    let draw_h = (LOGICAL_H as f32 * scale) as i32;
+    let draw_w = (logical_w as f32 * scale) as i32;
+    let draw_h = (logical_h as f32 * scale) as i32;
     let off_x = (out_w - draw_w) / 2;
     let off_y = (out_h - draw_h) / 2;
     if mx < off_x || my < off_y || mx >= off_x + draw_w || my >= off_y + draw_h {
@@ -333,7 +428,7 @@ pub fn window_to_logical(mx: i32, my: i32, out_w: i32, out_h: i32) -> Option<(i3
     }
     let lx = (((mx - off_x) as f32) / scale) as i32;
     let ly = (((my - off_y) as f32) / scale) as i32;
-    Some((lx.clamp(0, LOGICAL_W - 1), ly.clamp(0, LOGICAL_H - 1)))
+    Some((lx.clamp(0, logical_w - 1), ly.clamp(0, logical_h - 1)))
 }
 
 /// Draw a labeled button outline; dims when `enabled` is false.
@@ -353,11 +448,13 @@ mod tests {
 
     #[test]
     fn blit_preserves_aspect_and_letterboxes_wide_windows() {
-        let logical = vec![0x00ffffffu32; (LOGICAL_W * LOGICAL_H) as usize];
-        let out_w = LOGICAL_W * 2;
-        let out_h = LOGICAL_H;
+        let lw = logical_w(true);
+        let lh = logical_h(true);
+        let logical = vec![0x00ffffffu32; (lw * lh) as usize];
+        let out_w = lw * 2;
+        let out_h = lh;
         let mut out = vec![0u32; (out_w * out_h) as usize];
-        blit_to_window(&logical, &mut out, out_w, out_h);
+        blit_to_window(&logical, &mut out, out_w, out_h, lw, lh);
         let cx = out_w / 2;
         let cy = out_h / 2;
         assert_eq!(
@@ -374,16 +471,26 @@ mod tests {
 
     #[test]
     fn window_to_logical_round_trips_through_blit() {
-        let out_w = LOGICAL_W * 3 / 2;
-        let out_h = LOGICAL_H * 3 / 2;
+        let lw = logical_w(true);
+        let lh = logical_h(true);
+        let out_w = lw * 3 / 2;
+        let out_h = lh * 3 / 2;
         let (lx, ly) =
-            window_to_logical(out_w / 2, out_h / 2, out_w, out_h).expect("center is drawn");
-        assert!((0..LOGICAL_W).contains(&lx));
-        assert!((0..LOGICAL_H).contains(&ly));
+            window_to_logical(out_w / 2, out_h / 2, out_w, out_h, lw, lh).expect("center is drawn");
+        assert!((0..lw).contains(&lx));
+        assert!((0..lh).contains(&ly));
 
         // A point in the letterbox margin of a mismatched-aspect window maps to nothing.
-        let wide_w = LOGICAL_W * 2;
-        let wide_h = LOGICAL_H;
-        assert!(window_to_logical(1, 1, wide_w, wide_h).is_none());
+        let wide_w = lw * 2;
+        let wide_h = lh;
+        assert!(window_to_logical(1, 1, wide_w, wide_h, lw, lh).is_none());
+    }
+
+    #[test]
+    fn hiding_coords_shrinks_the_logical_canvas() {
+        assert!(logical_w(false) < logical_w(true));
+        assert!(logical_h(false) < logical_h(true));
+        assert_eq!(gutter(false), 0);
+        assert_eq!(topbar(false), 0);
     }
 }

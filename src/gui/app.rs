@@ -29,6 +29,10 @@ pub struct App {
     pub game: Game,
     pub selected: Option<Position>,
     pub legal: Vec<PotentialMove>,
+    /// Board square currently under the mouse, tracked live each frame (see
+    /// `set_hovered` in `main.rs`) regardless of selection state — needed
+    /// even while something is selected, to drive `hovered_stack_target`.
+    pub hovered: Option<Position>,
     pub pending: Option<PendingChoice>,
     ai_rx: Option<Receiver<Option<Move>>>,
     pub ai_thinking: bool,
@@ -48,6 +52,7 @@ impl App {
             game: Game::new(),
             selected: None,
             legal: Vec::new(),
+            hovered: None,
             pending: None,
             ai_rx: None,
             ai_thinking: false,
@@ -64,6 +69,7 @@ impl App {
         self.game = Game::new();
         self.selected = None;
         self.legal.clear();
+        self.hovered = None;
         self.pending = None;
         self.ai_rx = None;
         self.ai_thinking = false;
@@ -81,6 +87,7 @@ impl App {
         self.game = Game::new();
         self.selected = None;
         self.legal.clear();
+        self.hovered = None;
         self.pending = None;
         self.ai_rx = None;
         self.ai_thinking = false;
@@ -218,20 +225,76 @@ impl App {
         !self.ai_thinking && self.pending.is_none() && !self.undo_stack.is_empty()
     }
 
-    /// Squares holding one of the side-to-move's pieces that the opponent
-    /// could capture on their next turn (pseudo-legal move generation).
-    pub fn threatened_squares(&self) -> Vec<Position> {
-        let opponent_is_white = !self.game.is_white_to_move();
-        let mover = self.game.color_to_move();
+    /// Update the board square currently under the mouse. Tracked live every
+    /// frame regardless of selection state (see the field doc on `hovered`).
+    pub fn set_hovered(&mut self, pos: Option<Position>) {
+        self.hovered = pos;
+    }
+
+    /// Moves for the hovered piece, deduped by destination square, or empty
+    /// if nothing relevant is hovered.
+    fn hovered_piece_moves(&self, only_color: Color) -> Vec<Position> {
+        let Some(pos) = self.hovered else {
+            return Vec::new();
+        };
+        let Some(piece) = self.game.board.get_piece(&pos) else {
+            return Vec::new();
+        };
+        if piece.color != only_color {
+            return Vec::new();
+        }
+        let gen = MoveGenerator::new(&self.game.board, piece.color == Color::White);
         let mut out: Vec<Position> = Vec::new();
-        for pm in MoveGenerator::new(&self.game.board, opponent_is_white).get_all_moves() {
-            if let Some(p) = self.game.board.get_piece(&pm.to) {
-                if p.color == mover && !out.contains(&pm.to) {
-                    out.push(pm.to);
-                }
+        for pm in gen.get_moves(&pos) {
+            if !out.contains(&pm.to) {
+                out.push(pm.to);
             }
         }
         out
+    }
+
+    /// Squares highlighted by hovering a friendly piece when nothing is
+    /// selected — an immediate, lightweight preview of that piece's moves.
+    pub fn hover_preview_squares(&self) -> Vec<Position> {
+        if self.selected.is_some() {
+            return Vec::new();
+        }
+        self.hovered_piece_moves(self.game.color_to_move())
+    }
+
+    /// Squares highlighted by hovering an enemy piece — its own possible
+    /// moves, shown only when "show threats" is enabled (the sole purpose
+    /// of that option) and nothing is selected.
+    pub fn hover_threat_squares(&self) -> Vec<Position> {
+        if self.selected.is_some() || !self.show_threats {
+            return Vec::new();
+        }
+        let opponent = match self.game.color_to_move() {
+            Color::White => Color::Black,
+            Color::Black => Color::White,
+        };
+        self.hovered_piece_moves(opponent)
+    }
+
+    /// True when the hovered square holds a friendly piece that the current
+    /// selection could legally stack onto — used to warn the player (with a
+    /// big arrow, see `main.rs`) that clicking it merges the stack rather
+    /// than just reselecting that piece.
+    pub fn hovered_stack_target(&self) -> bool {
+        let Some(sel) = self.selected else {
+            return false;
+        };
+        let Some(pos) = self.hovered else {
+            return false;
+        };
+        if pos == sel || !self.legal.iter().any(|pm| pm.to == pos) {
+            return false;
+        }
+        self.game
+            .board
+            .get_piece(&pos)
+            .map(|p| p.color == self.game.color_to_move())
+            .unwrap_or(false)
     }
 
     /// Handle a click on board square `pos` while in the Playing screen.
