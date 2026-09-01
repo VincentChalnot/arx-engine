@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      - name: cargo test
+        run: cargo test --workspace --features gui
+
+  build-gui:
+    name: Build GUI (${{ matrix.os }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: keres-gui-linux-x86_64
+            bin: gui
+          - os: windows-latest
+            asset: keres-gui-windows-x86_64
+            bin: gui.exe
+          - os: macos-latest
+            asset: keres-gui-macos-x86_64
+            bin: gui
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: gui-${{ matrix.os }}
+
+      - name: Build GUI
+        run: cargo build --profile gui --bin gui --features gui
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir dist
+          cp "target/gui/${{ matrix.bin }}" dist/
+          cp README.md LICENSE dist/
+          tar czf "${{ matrix.asset }}.tar.gz" -C dist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}.tar.gz
+
+  release:
+    name: Create GitHub Release
+    needs: build-gui
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: artifacts
+        run: sha256sum *.tar.gz > SHA256SUMS.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Keres ${{ github.ref_name }}
+          files: artifacts/*
+          generate_release_notes: true
