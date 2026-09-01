@@ -251,9 +251,11 @@ KERES_SNAPSHOT=/tmp/out.ppm KERES_SCREEN=<screen> cargo run --features gui --bin
 
 `KERES_SCREEN` selects a canned scenario (see `run_snapshot` in `main.rs`):
 `menu`, `playing`, `selected`, `stacked`, `gameover`, `flipped`, `threats`,
-`history`, `nocoords`, `hover_friendly`, `hover_threat`, `hover_stack`. It
-never opens a window or touches the display, so it works over SSH/CI. The
-output is a raw PPM; convert it for viewing,
+`history`, `nocoords`, `hover_friendly`, `hover_threat`, `hover_stack`,
+`last_move`, `confirm_menu`, `stacked_close_hover`. Add `KERES_MOUSE=x,y`
+(logical-canvas pixel coordinates) to also check a dialog button's hover
+state. It never opens a window or touches the display, so it works over
+SSH/CI. The output is a raw PPM; convert it for viewing,
 e.g. `magick out.ppm -filter point -resize 300% out.png` (nearest-neighbor,
 matching how the real window scales the canvas, so what you see is what
 the game actually renders).

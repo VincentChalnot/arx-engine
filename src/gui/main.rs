@@ -114,6 +114,45 @@ fn menu_resume_button(show_coords: bool) -> Rect {
     }
 }
 
+/// "X" button that closes the fullstack/unstack disambiguation dialog,
+/// cancelling the move — top-right corner of the board area.
+fn close_button_rect(show_coords: bool) -> Rect {
+    let size = 26;
+    let pad = 14;
+    let x1 = render::board_w(show_coords) - pad;
+    let y0 = pad;
+    Rect {
+        x0: x1 - size,
+        y0,
+        x1,
+        y1: y0 + size,
+    }
+}
+
+/// YES/NO buttons for the "return to main menu?" confirmation prompt.
+fn confirm_menu_buttons(show_coords: bool) -> (Rect, Rect) {
+    let bw = 160;
+    let bh = 44;
+    let gap = 20;
+    let cx = render::board_w(show_coords) / 2;
+    let cy = render::logical_h(show_coords) / 2 + 10;
+    let total_w = 2 * bw + gap;
+    let x0 = cx - total_w / 2;
+    let yes = Rect {
+        x0,
+        y0: cy,
+        x1: x0 + bw,
+        y1: cy + bh,
+    };
+    let no = Rect {
+        x0: x0 + bw + gap,
+        y0: cy,
+        x1: x0 + bw + gap + bw,
+        y1: cy + bh,
+    };
+    (yes, no)
+}
+
 fn choice_buttons(n: usize, show_coords: bool) -> Vec<Rect> {
     let bw = 340;
     let bh = 44;
@@ -312,7 +351,7 @@ fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32) {
     c.draw_text(x0 + SIDEBAR_PAD, 14, "KERES", 2, render::COL_STATUS);
 
     let status = if app.ai_thinking {
-        "AI IS THINKING...".to_string()
+        format!("AI IS THINKING{}", ".".repeat(app.thinking_dots()))
     } else if app.pending.is_some() {
         "CHOOSE A MOVE".to_string()
     } else {
@@ -372,7 +411,7 @@ fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32) {
     }
 }
 
-fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32) {
+fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i32, i32)>) {
     let show_coords = app.show_coords;
     let gutter = render::gutter(show_coords);
     let topbar = render::topbar(show_coords);
@@ -400,6 +439,22 @@ fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32) {
     // render::COL_HL_*): a full-tile alpha wash rather than a dot/ring.
     // Layered weakest to strongest so a stronger highlight always wins where
     // they'd otherwise overlap.
+    if let Some(mv) = app.last_move {
+        for pos in [mv.from, mv.to] {
+            let (cx, cy) = screen_coord(pos, app.flipped);
+            let px0 = gutter + cx * TILE_W;
+            let py0 = topbar + cy * TILE_H;
+            c.fill_rect_alpha(
+                px0,
+                py0,
+                px0 + TILE_W,
+                py0 + TILE_H,
+                render::COL_HL_LAST_MOVE,
+                render::COL_HL_LAST_MOVE_A,
+            );
+        }
+    }
+
     for pos in app.hover_threat_squares() {
         let (cx, cy) = screen_coord(pos, app.flipped);
         let px0 = gutter + cx * TILE_W;
@@ -524,15 +579,44 @@ fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32) {
         let rects = choice_buttons(pending.options.len(), show_coords);
         for (i, mv) in pending.options.iter().enumerate() {
             let rect = &rects[i];
-            c.stroke_rect(rect.x0, rect.y0, rect.x1, rect.y1, 2, render::COL_STATUS);
+            let hovered = mouse.map(|(mx, my)| rect.contains(mx, my)).unwrap_or(false);
             let label = move_choice_label(&app.game, mv);
-            c.draw_text_centered(rect.cx(), rect.cy() - 5, &label, 1, render::COL_STATUS);
+            render::draw_dialog_button(c, rect.x0, rect.y0, rect.x1, rect.y1, &label, hovered);
+        }
+        let close = close_button_rect(show_coords);
+        let close_hovered = mouse
+            .map(|(mx, my)| close.contains(mx, my))
+            .unwrap_or(false);
+        render::draw_dialog_button(
+            c,
+            close.x0,
+            close.y0,
+            close.x1,
+            close.y1,
+            "X",
+            close_hovered,
+        );
+    }
+
+    if app.confirm_menu {
+        c.fill_rect_alpha(0, 0, render::board_w(show_coords), lh, 0x000000, 0.72);
+        c.draw_text_centered(
+            render::board_w(show_coords) / 2,
+            lh / 2 - 40,
+            "RETURN TO MAIN MENU?",
+            2,
+            render::COL_STATUS,
+        );
+        let (yes, no) = confirm_menu_buttons(show_coords);
+        for (rect, label) in [(&yes, "YES"), (&no, "NO")] {
+            let hovered = mouse.map(|(mx, my)| rect.contains(mx, my)).unwrap_or(false);
+            render::draw_dialog_button(c, rect.x0, rect.y0, rect.x1, rect.y1, label, hovered);
         }
     }
 }
 
 fn draw_game_over(c: &mut Canvas, app: &App, history_scroll: i32) {
-    draw_board(c, app, history_scroll);
+    draw_board(c, app, history_scroll, None);
     let board_w = render::board_w(app.show_coords);
     let lh = render::logical_h(app.show_coords);
     c.fill_rect_alpha(0, 0, board_w, lh, 0x000000, 0.72);
@@ -566,10 +650,21 @@ fn write_ppm(path: &str, buf: &[u32], w: i32, h: i32) {
     out.write_all(&bytes).unwrap();
 }
 
+/// Optional `KERES_MOUSE=x,y` override for the snapshot tool, so dialog
+/// button hover states (see `render::draw_dialog_button`) can be checked
+/// without a real window.
+fn snapshot_mouse() -> Option<(i32, i32)> {
+    let raw = std::env::var("KERES_MOUSE").ok()?;
+    let (x, y) = raw.split_once(',')?;
+    Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+}
+
 /// Headless render-to-file path used only for local visual verification
 /// (`KERES_SNAPSHOT=<path>.ppm KERES_SCREEN=menu|playing|selected|stacked|
 /// gameover|flipped|threats|history|nocoords|hover_friendly|hover_threat|
-/// hover_stack`). Never touches a window or the real display.
+/// hover_stack|last_move|confirm_menu|stacked_close_hover`, optionally with
+/// `KERES_MOUSE=x,y` to check dialog-button hover). Never touches a window
+/// or the real display.
 fn run_snapshot(path: &str) {
     use keres_engine::{Board, Color, PieceType};
     let mut app = App::new();
@@ -705,6 +800,38 @@ fn run_snapshot(path: &str) {
             app.click_square(Position::new(4, 4));
             app.set_hovered(Some(Position::new(4, 3)));
         }
+        "last_move" => {
+            app.start_game(Mode::Hotseat);
+            app.click_square(Position::new(2, 6));
+            app.click_square(Position::new(1, 5));
+        }
+        "confirm_menu" => {
+            app.start_game(Mode::Hotseat);
+            app.request_menu_confirm();
+        }
+        "stacked_close_hover" => {
+            app.start_game(Mode::Hotseat);
+            let mut board = Board::empty();
+            board.set_piece(
+                &Position::new(4, 8),
+                Some(Piece::new(Color::White, PieceType::King, None)),
+            );
+            board.set_piece(
+                &Position::new(4, 0),
+                Some(Piece::new(Color::Black, PieceType::King, None)),
+            );
+            board.set_piece(
+                &Position::new(4, 4),
+                Some(Piece::new(
+                    Color::White,
+                    PieceType::Soldier,
+                    Some(PieceType::Bishop),
+                )),
+            );
+            app.game.board = board;
+            app.click_square(Position::new(4, 4));
+            app.click_square(Position::new(5, 3));
+        }
         other => panic!("unknown KERES_SCREEN {other}"),
     }
     let lw = render::logical_w(app.show_coords);
@@ -717,7 +844,7 @@ fn run_snapshot(path: &str) {
     };
     match app.screen {
         Screen::Menu => draw_menu(&mut canvas, app.show_coords, app.level),
-        Screen::Playing => draw_board(&mut canvas, &app, 0),
+        Screen::Playing => draw_board(&mut canvas, &app, 0, snapshot_mouse()),
         Screen::GameOver => draw_game_over(&mut canvas, &app, 0),
     }
     write_ppm(path, &buffer, lw, lh);
@@ -747,8 +874,13 @@ fn main() {
     let mut output: Vec<u32> = Vec::new();
     let mut prev_mouse_down = false;
     let mut history_scroll: i32 = 0;
+    // ESC never quits directly except from the main menu: from a game in
+    // progress it opens the return-to-menu confirmation instead (see
+    // App::request_menu_confirm), so the window close is driven by this flag
+    // rather than the raw key state.
+    let mut should_quit = false;
 
-    while window.is_open() && !window.is_key_down(Key::Escape) {
+    while window.is_open() && !should_quit {
         app.poll_ai();
 
         let show_coords = app.show_coords;
@@ -773,7 +905,11 @@ fn main() {
         // "this creates a stack" arrow (see App::hover_preview_squares /
         // hovered_stack_target) — only meaningful while a move can actually
         // be made.
-        if app.screen == Screen::Playing && !app.ai_thinking && app.pending.is_none() {
+        if app.screen == Screen::Playing
+            && !app.ai_thinking
+            && app.pending.is_none()
+            && !app.confirm_menu
+        {
             let hovered =
                 logical_mouse.and_then(|(lx, ly)| tile_at(lx, ly, app.flipped, show_coords));
             app.set_hovered(hovered);
@@ -820,19 +956,30 @@ fn main() {
                     }
                     Screen::Playing => {
                         if let Some(pending) = &app.pending {
-                            let rects = choice_buttons(pending.options.len(), show_coords);
-                            for (i, rect) in rects.iter().enumerate() {
-                                if rect.contains(lx, ly) {
-                                    app.resolve_choice(i);
-                                    break;
+                            if close_button_rect(show_coords).contains(lx, ly) {
+                                app.cancel_choice();
+                            } else {
+                                let rects = choice_buttons(pending.options.len(), show_coords);
+                                for (i, rect) in rects.iter().enumerate() {
+                                    if rect.contains(lx, ly) {
+                                        app.resolve_choice(i);
+                                        break;
+                                    }
                                 }
+                            }
+                        } else if app.confirm_menu {
+                            let (yes, no) = confirm_menu_buttons(show_coords);
+                            if yes.contains(lx, ly) {
+                                app.confirm_back_to_menu();
+                            } else if no.contains(lx, ly) {
+                                app.cancel_menu_confirm();
                             }
                         } else {
                             let mut handled = false;
                             for (rect, _label, action, enabled) in sidebar_buttons(&app) {
                                 if enabled && rect.contains(lx, ly) {
                                     match action {
-                                        SidebarAction::MainMenu => app.back_to_menu(),
+                                        SidebarAction::MainMenu => app.request_menu_confirm(),
                                         SidebarAction::SwitchSides => app.toggle_flip(),
                                         SidebarAction::ToggleThreats => app.toggle_threats(),
                                         SidebarAction::ToggleCoords => app.toggle_coords(),
@@ -855,11 +1002,20 @@ fn main() {
             }
         }
 
-        if window.is_key_pressed(Key::Escape, KeyRepeat::No) && app.screen != Screen::Menu {
-            if app.pending.is_some() {
-                app.cancel_choice();
-            } else {
-                app.back_to_menu();
+        if window.is_key_pressed(Key::Escape, KeyRepeat::No) {
+            match app.screen {
+                // The only place ESC quits the app outright.
+                Screen::Menu => should_quit = true,
+                Screen::Playing => {
+                    if app.pending.is_some() {
+                        app.cancel_choice();
+                    } else if app.confirm_menu {
+                        app.cancel_menu_confirm();
+                    } else {
+                        app.request_menu_confirm();
+                    }
+                }
+                Screen::GameOver => app.back_to_menu(),
             }
         }
         if window.is_key_pressed(Key::U, KeyRepeat::No) && app.screen == Screen::Playing {
@@ -899,7 +1055,7 @@ fn main() {
         };
         match app.screen {
             Screen::Menu => draw_menu(&mut canvas, show_coords, app.level),
-            Screen::Playing => draw_board(&mut canvas, &app, history_scroll),
+            Screen::Playing => draw_board(&mut canvas, &app, history_scroll, logical_mouse),
             Screen::GameOver => draw_game_over(&mut canvas, &app, history_scroll),
         }
 

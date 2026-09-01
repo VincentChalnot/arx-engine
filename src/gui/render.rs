@@ -55,8 +55,8 @@ pub fn logical_h(show_coords: bool) -> i32 {
 }
 
 pub const COL_PAGE_BG: u32 = 0x14140f;
-pub const COL_LIGHT_SQ: u32 = 0xefe3c8;
-pub const COL_DARK_SQ: u32 = 0xc79a58;
+pub const COL_LIGHT_SQ: u32 = 0xf5f5dc;
+pub const COL_DARK_SQ: u32 = 0xd2b48c;
 pub const COL_COORD: u32 = 0x9c8a63;
 pub const COL_STATUS: u32 = 0xe8dcc0;
 pub const COL_SELECT: u32 = 0xe0913c;
@@ -73,10 +73,18 @@ pub const COL_HL_POTENTIAL: u32 = 0x55d157;
 pub const COL_HL_POTENTIAL_A: f32 = 0.5;
 /// Also used for the "this creates a stack" hover arrow (see
 /// `App::hovered_stack_target`) — same gold as the hover-preview wash.
-pub const COL_HL_HOVER: u32 = 0xe1ca58;
+pub const COL_HL_HOVER: u32 = COL_GOLD;
 pub const COL_HL_HOVER_A: f32 = 0.4;
 pub const COL_HL_THREAT: u32 = 0xff4444;
 pub const COL_HL_THREAT_A: f32 = 0.5;
+/// Last-moved-piece highlight: the square it left and the square it landed
+/// on (see `App::last_move`).
+pub const COL_HL_LAST_MOVE: u32 = 0xe89038;
+pub const COL_HL_LAST_MOVE_A: f32 = 0.45;
+
+/// "Gold" accent from the palette, used for the hover-preview wash and (see
+/// `draw_dialog_button`) for hovered dialog buttons.
+pub const COL_GOLD: u32 = 0xe1ca58;
 
 pub const COIN_WHITE: u32 = 0xf3ead2;
 pub const COIN_BLACK: u32 = 0x1c1a16;
@@ -440,6 +448,29 @@ pub fn draw_button(c: &mut Canvas, x0: i32, y0: i32, x1: i32, y1: i32, label: &s
     };
     c.stroke_rect(x0, y0, x1, y1, 2, color);
     c.draw_text_centered((x0 + x1) / 2, (y0 + y1) / 2 - 5, label, 1, color);
+}
+
+/// Draw a modal-dialog button (the fullstack/unstack choice prompt, its "X"
+/// close button, and the return-to-menu confirmation): outlined normally,
+/// filled solid gold with inverted text when the mouse hovers it.
+pub fn draw_dialog_button(
+    c: &mut Canvas,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    label: &str,
+    hovered: bool,
+) {
+    let cx = (x0 + x1) / 2;
+    let cy = (y0 + y1) / 2;
+    if hovered {
+        c.fill_rect(x0, y0, x1, y1, COL_GOLD);
+        c.draw_text_centered(cx, cy - 5, label, 1, COL_PAGE_BG);
+    } else {
+        c.stroke_rect(x0, y0, x1, y1, 2, COL_STATUS);
+        c.draw_text_centered(cx, cy - 5, label, 1, COL_STATUS);
+    }
 }
 
 #[cfg(test)]

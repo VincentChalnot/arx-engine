@@ -4,6 +4,7 @@
 use keres_engine::{Color, Game, Move, MoveGenerator, Position, PotentialMove};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
+use std::time::Instant;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -36,6 +37,17 @@ pub struct App {
     pub pending: Option<PendingChoice>,
     ai_rx: Option<Receiver<Option<Move>>>,
     pub ai_thinking: bool,
+    /// When the current AI search started, used to animate the "AI IS
+    /// THINKING..." dots (see `thinking_dots`) at a steady one-per-second
+    /// pace regardless of how often the frame loop polls it.
+    ai_thinking_since: Option<Instant>,
+    /// The most recently applied move (by either side), so the board can
+    /// highlight where it came from and landed. Cleared on a fresh/resumed
+    /// game and rewound by `undo`.
+    pub last_move: Option<Move>,
+    /// True while the "return to main menu?" confirmation prompt is shown
+    /// over the Playing screen (see `request_menu_confirm`).
+    pub confirm_menu: bool,
     pub flipped: bool,
     pub show_threats: bool,
     pub show_coords: bool,
@@ -59,6 +71,9 @@ impl App {
             pending: None,
             ai_rx: None,
             ai_thinking: false,
+            ai_thinking_since: None,
+            last_move: None,
+            confirm_menu: false,
             flipped: false,
             show_threats: true,
             show_coords: true,
@@ -80,6 +95,9 @@ impl App {
         self.pending = None;
         self.ai_rx = None;
         self.ai_thinking = false;
+        self.ai_thinking_since = None;
+        self.last_move = None;
+        self.confirm_menu = false;
         self.history.clear();
         self.undo_stack.clear();
         self.screen = Screen::Playing;
@@ -98,6 +116,9 @@ impl App {
         self.pending = None;
         self.ai_rx = None;
         self.ai_thinking = false;
+        self.ai_thinking_since = None;
+        self.last_move = None;
+        self.confirm_menu = false;
         self.history.clear();
         self.undo_stack.clear();
         self.screen = Screen::Playing;
@@ -111,6 +132,7 @@ impl App {
             let undo = self.game.make(&mv);
             self.history.push((mv, is_capture));
             self.undo_stack.push((mv, undo));
+            self.last_move = Some(mv);
         }
         self.maybe_start_ai();
     }
@@ -131,6 +153,7 @@ impl App {
         }
         if self.is_ai_turn() {
             self.ai_thinking = true;
+            self.ai_thinking_since = Some(Instant::now());
             let game_clone = self.game.clone();
             let config = self.ai_search_config();
             let (tx, rx) = mpsc::channel();
@@ -166,10 +189,20 @@ impl App {
         let Some(rx) = &self.ai_rx else { return };
         if let Ok(mv) = rx.try_recv() {
             self.ai_thinking = false;
+            self.ai_thinking_since = None;
             self.ai_rx = None;
             if let Some(mv) = mv {
                 self.apply_move(mv);
             }
+        }
+    }
+
+    /// Number of dots (1..=3) to show after "AI IS THINKING", cycling once
+    /// per second so the message visibly animates while the search runs.
+    pub fn thinking_dots(&self) -> usize {
+        match self.ai_thinking_since {
+            Some(t) => (t.elapsed().as_secs() % 3) as usize + 1,
+            None => 1,
         }
     }
 
@@ -183,6 +216,7 @@ impl App {
         let undo = self.game.make(&mv);
         self.history.push((mv, is_capture));
         self.undo_stack.push((mv, undo));
+        self.last_move = Some(mv);
         self.selected = None;
         self.legal.clear();
         self.pending = None;
@@ -199,7 +233,11 @@ impl App {
     /// Undo the human's last move. When playing the AI, also undoes the
     /// engine's reply first so control always returns to the human.
     pub fn undo(&mut self) {
-        if self.ai_thinking || self.pending.is_some() || self.undo_stack.is_empty() {
+        if self.ai_thinking
+            || self.pending.is_some()
+            || self.confirm_menu
+            || self.undo_stack.is_empty()
+        {
             return;
         }
         while let Some((mv, undo)) = self.undo_stack.pop() {
@@ -209,6 +247,7 @@ impl App {
                 break;
             }
         }
+        self.last_move = self.undo_stack.last().map(|(mv, _)| *mv);
         self.selected = None;
         self.legal.clear();
         self.pending = None;
@@ -223,7 +262,7 @@ impl App {
 
     /// The current side to move resigns; the opponent wins immediately.
     pub fn resign(&mut self) {
-        if self.screen != Screen::Playing || self.pending.is_some() {
+        if self.screen != Screen::Playing || self.pending.is_some() || self.confirm_menu {
             return;
         }
         let resigning = self.game.color_to_move();
@@ -332,7 +371,7 @@ impl App {
 
     /// Handle a click on board square `pos` while in the Playing screen.
     pub fn click_square(&mut self, pos: Position) {
-        if self.ai_thinking || self.pending.is_some() {
+        if self.ai_thinking || self.pending.is_some() || self.confirm_menu {
             return;
         }
         if let Some(sel) = self.selected {
@@ -412,6 +451,27 @@ impl App {
         self.screen = Screen::Menu;
         self.ai_rx = None;
         self.ai_thinking = false;
+        self.ai_thinking_since = None;
+        self.confirm_menu = false;
+    }
+
+    /// Open the "return to main menu?" prompt (ESC or the MAIN MENU button)
+    /// — only while a game is actually in progress with no other dialog
+    /// already up.
+    pub fn request_menu_confirm(&mut self) {
+        if self.screen == Screen::Playing && self.pending.is_none() {
+            self.confirm_menu = true;
+        }
+    }
+
+    /// User confirmed leaving the game in progress.
+    pub fn confirm_back_to_menu(&mut self) {
+        self.back_to_menu();
+    }
+
+    /// User dismissed the "return to main menu?" prompt without leaving.
+    pub fn cancel_menu_confirm(&mut self) {
+        self.confirm_menu = false;
     }
 }
 
