@@ -127,11 +127,32 @@ impl App {
             let game_clone = self.game.clone();
             let (tx, rx) = mpsc::channel();
             thread::spawn(move || {
-                let mv = keres_engine::engine::find_best_move(&game_clone, None, None);
+                let mv = keres_engine::engine::find_best_move(
+                    &game_clone,
+                    Self::ai_search_config(),
+                    None,
+                );
                 let _ = tx.send(mv);
             });
             self.ai_rx = Some(rx);
         }
+    }
+
+    // The default full-depth search can take longer than a shared CI
+    // runner's CPU budget allows, which made timing-based tests below
+    // flaky. Tests only care that a move is produced and applied, so they
+    // use a shallow depth; real gameplay keeps the full-strength default.
+    #[cfg(not(test))]
+    fn ai_search_config() -> Option<keres_engine::engine::SearchConfig> {
+        None
+    }
+
+    #[cfg(test)]
+    fn ai_search_config() -> Option<keres_engine::engine::SearchConfig> {
+        Some(keres_engine::engine::SearchConfig {
+            max_depth: 2,
+            ..Default::default()
+        })
     }
 
     /// Call once per frame: applies the engine's move once the background
