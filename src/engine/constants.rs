@@ -3,6 +3,13 @@
 /// Maximum search depth (ply from root).
 pub const MAX_DEPTH: usize = 4;
 
+/// Lowest engine strength level exposed to callers (e.g. the GUI difficulty
+/// slider). See `SearchConfig::for_level`.
+pub const MIN_LEVEL: u8 = 1;
+
+/// Highest engine strength level exposed to callers.
+pub const MAX_LEVEL: u8 = 10;
+
 /// Weight applied to mobility count (reachable empty squares × weight).
 pub const MOBILITY_WEIGHT: i32 = 2;
 

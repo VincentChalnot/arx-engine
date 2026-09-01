@@ -6,11 +6,13 @@ pub mod loop_detection;
 pub mod move_ordering;
 pub mod negamax;
 pub mod quiescence;
+pub mod rng;
 
 use crate::engine::constants::MAX_KILLER_DEPTH;
 use crate::engine::search::killer::KillerTable;
 use crate::engine::search::loop_detection::LoopDetector;
 use crate::engine::search::negamax::negamax;
+use crate::engine::search::rng::Rng;
 use crate::engine::tree_recorder::TreeRecorder;
 use crate::engine::tt::TranspositionTable;
 use crate::engine::types::SearchConfig;
@@ -120,11 +122,13 @@ pub fn root_search(
         })
         .collect();
 
-    // Pick the best root move.
-    let (best_move, best_score) = results
-        .iter()
-        .max_by_key(|(_, s)| *s)
-        .map(|&(mv, s)| (Some(mv), s))
+    // Pick the root move to play. `results` already holds every legal root
+    // move searched to full depth, so `select_root_move` picks among
+    // already-computed scores — see `SearchConfig::noise_temperature` /
+    // `blunder_chance` for what makes it deviate from the true best move.
+    let mut rng = Rng::new();
+    let (best_move, best_score) = select_root_move(&results, config, &mut rng)
+        .map(|(mv, s)| (Some(mv), s))
         .unwrap_or((None, -crate::engine::constants::KING_VALUE));
 
     // Extract PV by re-running a single-threaded search and following best moves.
@@ -143,6 +147,55 @@ pub fn root_search(
             elapsed: start.elapsed(),
         },
     }
+}
+
+/// Pick which already-searched root move to actually play.
+///
+/// `results` holds every legal root move with its full-depth score (NegaMax
+/// relative to the side to move). With `config.blunder_chance` and
+/// `config.noise_temperature` both `0.0` (the default) this always returns
+/// the highest-scoring move, unchanged from a plain `max_by_key`.
+///
+/// Otherwise, first roll for an outright blunder (`blunder_chance`): ignore
+/// every score and play a uniformly random legal move. Failing that, apply
+/// softmax noise at `noise_temperature`: every move gets picked with
+/// probability proportional to `exp((score - best_score) / temperature)`, so
+/// the true best move is always the likeliest pick, nearby-scoring moves get
+/// a real chance, and clearly worse ones fade out fast without a hard
+/// cutoff.
+fn select_root_move(
+    results: &[(Move, i32)],
+    config: &SearchConfig,
+    rng: &mut Rng,
+) -> Option<(Move, i32)> {
+    if results.is_empty() {
+        return None;
+    }
+
+    if config.blunder_chance > 0.0 && rng.next_f32() < config.blunder_chance {
+        let idx = ((rng.next_f32() * results.len() as f32) as usize).min(results.len() - 1);
+        return Some(results[idx]);
+    }
+
+    let best_score = results.iter().map(|&(_, s)| s).max().unwrap();
+
+    if config.noise_temperature <= 0.0 {
+        return results.iter().copied().max_by_key(|&(_, s)| s);
+    }
+
+    let weights: Vec<f32> = results
+        .iter()
+        .map(|&(_, s)| ((s - best_score) as f32 / config.noise_temperature).exp())
+        .collect();
+    let total: f32 = weights.iter().sum();
+    let mut pick = rng.next_f32() * total;
+    for (i, &w) in weights.iter().enumerate() {
+        pick -= w;
+        if pick <= 0.0 {
+            return Some(results[i]);
+        }
+    }
+    results.last().copied()
 }
 
 /// Re-run the search from `root` → `first_move` and walk down the TT best
@@ -268,5 +321,96 @@ mod tests {
             result.best_move.is_some(),
             "Expected a move even with game history present"
         );
+    }
+
+    fn fake_results() -> Vec<(Move, i32)> {
+        vec![
+            (
+                Move {
+                    from: Position::new(0, 0),
+                    to: Position::new(0, 1),
+                    unstack: false,
+                },
+                10,
+            ),
+            (
+                Move {
+                    from: Position::new(1, 0),
+                    to: Position::new(1, 1),
+                    unstack: false,
+                },
+                30,
+            ),
+            (
+                Move {
+                    from: Position::new(2, 0),
+                    to: Position::new(2, 1),
+                    unstack: false,
+                },
+                20,
+            ),
+        ]
+    }
+
+    #[test]
+    fn select_root_move_is_deterministic_argmax_at_zero_noise() {
+        let results = fake_results();
+        let config = SearchConfig::default(); // noise_temperature == 0.0, blunder_chance == 0.0
+        for seed in 0..20u64 {
+            let mut rng = Rng::seeded(seed + 1);
+            let (_, score) = select_root_move(&results, &config, &mut rng).unwrap();
+            assert_eq!(score, 30);
+        }
+    }
+
+    #[test]
+    fn select_root_move_always_blunders_at_full_blunder_chance() {
+        let results = fake_results();
+        let config = SearchConfig {
+            blunder_chance: 1.0,
+            ..Default::default()
+        };
+        let mut rng = Rng::seeded(7);
+        let mut saw_non_best = false;
+        for _ in 0..50 {
+            let (_, score) = select_root_move(&results, &config, &mut rng).unwrap();
+            assert!(results.iter().any(|&(_, s)| s == score));
+            if score != 30 {
+                saw_non_best = true;
+            }
+        }
+        assert!(
+            saw_non_best,
+            "expected a full blunder chance to sometimes pick a non-best move"
+        );
+    }
+
+    #[test]
+    fn select_root_move_with_noise_sometimes_picks_a_non_best_move() {
+        let results = fake_results();
+        let config = SearchConfig {
+            noise_temperature: 15.0,
+            ..Default::default()
+        };
+        let mut rng = Rng::seeded(99);
+        let mut saw_non_best = false;
+        for _ in 0..200 {
+            let (_, score) = select_root_move(&results, &config, &mut rng).unwrap();
+            assert!(results.iter().any(|&(_, s)| s == score));
+            if score != 30 {
+                saw_non_best = true;
+            }
+        }
+        assert!(
+            saw_non_best,
+            "expected some noise to occasionally pick a non-best move"
+        );
+    }
+
+    #[test]
+    fn select_root_move_returns_none_for_empty_results() {
+        let config = SearchConfig::default();
+        let mut rng = Rng::seeded(3);
+        assert!(select_root_move(&[], &config, &mut rng).is_none());
     }
 }

@@ -265,6 +265,7 @@ fn main() {
             max_depth: args
                 .max_depth
                 .unwrap_or(keres_engine::engine::constants::MAX_DEPTH),
+            ..Default::default()
         };
 
         // ── Tree recorder (writes JSONL to stdout) ───────────────────────────

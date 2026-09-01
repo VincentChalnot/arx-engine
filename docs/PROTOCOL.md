@@ -89,6 +89,7 @@ sending it to `/play`.
 | POST   | `/replay-moves`      | `N × 2` bytes: `Move` list from the initial position     | 83 bytes: the resulting `Game`                    |
 | POST   | `/engine-move-board` | 83 bytes: `Game`                                          | 2 bytes: the engine's chosen `Move`                |
 | POST   | `/engine-move-game`  | `N × 2` bytes: full `Move` history from the initial position | 2 bytes: the engine's chosen `Move`           |
+| POST   | `/engine-move-game/:level` | `N × 2` bytes: full `Move` history from the initial position | 2 bytes: the engine's chosen `Move`     |
 
 `/engine-move-game` replays the given move list from a fresh `Game`,
 reconstructing the position-hash history so the search's loop/repetition
@@ -96,6 +97,17 @@ detection sees the same game the caller has been playing (`/engine-move-board`
 has no history, so it cannot detect repetition draws). Both run
 `root_search` at `MAX_DEPTH` (`src/engine/constants.rs`) and respond
 `500` if no legal move exists (i.e. the game is already over).
+
+`/engine-move-game/:level` is identical to `/engine-move-game` except the
+integer path segment picks an engine strength level (`SearchConfig::for_level`,
+`src/engine/types.rs`) instead of always searching at full power — the same
+1 (weakest) .. 10 (full strength) scale as the native GUI's difficulty
+slider, spanning search depth, quiescence/killer-move heuristics, and
+root-move noise/blunder chance. `:level` outside `1..=10` gets `400`
+(unlike the GUI slider, the API doesn't silently clamp an out-of-range
+value). There is no leveled variant of `/engine-move-board` — it has no
+game history, so it's only used to estimate a position, not to play a move
+on a difficulty-limited opponent's behalf.
 
 Malformed/mis-sized payloads get `400`; internal decode failures get `500`.
 

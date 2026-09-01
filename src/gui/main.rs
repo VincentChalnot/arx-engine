@@ -80,6 +80,27 @@ fn menu_mode_buttons(show_coords: bool) -> [(Rect, &'static str, Mode); 3] {
     ]
 }
 
+/// Ten clickable boxes acting as a discrete 1-10 "slider" for AI strength
+/// (`App::level`), laid out between the subtitle text and the mode buttons.
+fn menu_level_boxes(show_coords: bool) -> [Rect; 10] {
+    let bw = 40;
+    let bh = 32;
+    let gap = 6;
+    let cx = render::logical_w(show_coords) / 2;
+    let total_w = 10 * bw + 9 * gap;
+    let x0 = cx - total_w / 2;
+    let top = 214;
+    std::array::from_fn(|i| {
+        let x = x0 + i as i32 * (bw + gap);
+        Rect {
+            x0: x,
+            y0: top,
+            x1: x + bw,
+            y1: top + bh,
+        }
+    })
+}
+
 fn menu_resume_button(show_coords: bool) -> Rect {
     let bw = 460;
     let bh = 52;
@@ -238,7 +259,7 @@ fn move_notation(mv: &Move, is_capture: bool) -> String {
     )
 }
 
-fn draw_menu(c: &mut Canvas, show_coords: bool) {
+fn draw_menu(c: &mut Canvas, show_coords: bool, level: u8) {
     let lw = render::logical_w(show_coords);
     let lh = render::logical_h(show_coords);
     c.fill_rect(0, 0, lw, lh, render::COL_PAGE_BG);
@@ -251,6 +272,20 @@ fn draw_menu(c: &mut Canvas, show_coords: bool) {
         1,
         render::COL_COORD,
     );
+    c.draw_text_centered(lw / 2, 202, "AI DIFFICULTY", 1, render::COL_COORD);
+    for (i, rect) in menu_level_boxes(show_coords).into_iter().enumerate() {
+        let selected = level as usize == i + 1;
+        let color = if selected {
+            render::COL_SELECT
+        } else {
+            render::COL_STATUS
+        };
+        if selected {
+            c.fill_rect_alpha(rect.x0, rect.y0, rect.x1, rect.y1, render::COL_SELECT, 0.35);
+        }
+        c.stroke_rect(rect.x0, rect.y0, rect.x1, rect.y1, 2, color);
+        c.draw_text_centered(rect.cx(), rect.cy() - 5, &(i + 1).to_string(), 1, color);
+    }
     for (rect, label, _) in menu_mode_buttons(show_coords) {
         c.stroke_rect(rect.x0, rect.y0, rect.x1, rect.y1, 2, render::COL_STATUS);
         c.draw_text_centered(rect.cx(), rect.cy() - 5, label, 1, render::COL_STATUS);
@@ -681,7 +716,7 @@ fn run_snapshot(path: &str) {
         h: lh,
     };
     match app.screen {
-        Screen::Menu => draw_menu(&mut canvas, app.show_coords),
+        Screen::Menu => draw_menu(&mut canvas, app.show_coords, app.level),
         Screen::Playing => draw_board(&mut canvas, &app, 0),
         Screen::GameOver => draw_game_over(&mut canvas, &app, 0),
     }
@@ -758,6 +793,13 @@ fn main() {
                 match app.screen {
                     Screen::Menu => {
                         let mut handled = false;
+                        for (i, rect) in menu_level_boxes(show_coords).into_iter().enumerate() {
+                            if rect.contains(lx, ly) {
+                                app.set_level(i as u8 + 1);
+                                handled = true;
+                                break;
+                            }
+                        }
                         for (rect, _label, mode) in menu_mode_buttons(show_coords) {
                             if rect.contains(lx, ly) {
                                 app.start_game(mode);
@@ -856,7 +898,7 @@ fn main() {
             h: lh,
         };
         match app.screen {
-            Screen::Menu => draw_menu(&mut canvas, show_coords),
+            Screen::Menu => draw_menu(&mut canvas, show_coords, app.level),
             Screen::Playing => draw_board(&mut canvas, &app, history_scroll),
             Screen::GameOver => draw_game_over(&mut canvas, &app, history_scroll),
         }

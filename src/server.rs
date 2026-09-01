@@ -1,11 +1,15 @@
 use axum::{
     body::Bytes,
+    extract::Path,
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
     Router,
 };
 use keres_engine::board::BOARD_SIZE;
+use keres_engine::engine::constants::{MAX_LEVEL, MIN_LEVEL};
+use keres_engine::engine::search::root_search;
+use keres_engine::engine::types::SearchConfig;
 use keres_engine::game::Game;
 use keres_engine::moves::Move;
 use std::env;
@@ -32,6 +36,7 @@ async fn main() {
         .route("/replay-moves", post(replay_moves))
         .route("/engine-move-board", post(engine_move_board))
         .route("/engine-move-game", post(engine_move_game))
+        .route("/engine-move-game/:level", post(engine_move_game_leveled))
         .layer(cors);
 
     // Read PORT from environment variable, fallback to 3000
@@ -103,8 +108,6 @@ async fn engine_move_board(payload: Bytes) -> Result<Vec<u8>, StatusCode> {
     let game = Game::from_binary(board_array).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     use keres_engine::engine::constants::MAX_DEPTH;
-    use keres_engine::engine::search::root_search;
-    use keres_engine::engine::types::SearchConfig;
 
     let config = SearchConfig {
         max_depth: MAX_DEPTH,
@@ -117,12 +120,39 @@ async fn engine_move_board(payload: Bytes) -> Result<Vec<u8>, StatusCode> {
 }
 
 async fn engine_move_game(payload: Bytes) -> Result<Vec<u8>, StatusCode> {
-    let move_bytes = payload;
-
     use keres_engine::engine::constants::MAX_DEPTH;
-    use keres_engine::engine::search::root_search;
-    use keres_engine::engine::types::SearchConfig;
 
+    let config = SearchConfig {
+        max_depth: MAX_DEPTH,
+        ..Default::default()
+    };
+    engine_move_game_with_config(&payload, &config)
+}
+
+/// Same as `/engine-move-game`, but plays at a caller-chosen strength level
+/// (`SearchConfig::for_level`) instead of always searching at full power —
+/// e.g. so a platform client can offer the same difficulty presets as the
+/// native GUI. `level` is `MIN_LEVEL..=MAX_LEVEL`; out-of-range values are a
+/// client error rather than silently clamped, since a public API contract
+/// shouldn't quietly mask a caller bug the way an internal GUI slider can.
+async fn engine_move_game_leveled(
+    Path(level): Path<u8>,
+    payload: Bytes,
+) -> Result<Vec<u8>, StatusCode> {
+    if !(MIN_LEVEL..=MAX_LEVEL).contains(&level) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let config = SearchConfig::for_level(level);
+    engine_move_game_with_config(&payload, &config)
+}
+
+/// Shared by `/engine-move-game` and `/engine-move-game/:level`: replay the
+/// move history into a fresh `Game`, reconstruct the position-hash history
+/// for repetition detection, then search from the resulting position.
+fn engine_move_game_with_config(
+    move_bytes: &[u8],
+    config: &SearchConfig,
+) -> Result<Vec<u8>, StatusCode> {
     if move_bytes.len() % 2 != 0 {
         return Err(StatusCode::BAD_REQUEST);
     }
@@ -142,12 +172,7 @@ async fn engine_move_game(payload: Bytes) -> Result<Vec<u8>, StatusCode> {
         game.make(&mv);
     }
 
-    let config = SearchConfig {
-        max_depth: MAX_DEPTH,
-        ..Default::default()
-    };
-
-    let result = root_search(&game, &config, &game_history, None);
+    let result = root_search(&game, config, &game_history, None);
     let best_move = result.best_move.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(best_move.to_u16().to_le_bytes().to_vec())
 }

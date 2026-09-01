@@ -39,6 +39,9 @@ pub struct App {
     pub flipped: bool,
     pub show_threats: bool,
     pub show_coords: bool,
+    /// AI strength, `MIN_LEVEL`..=`MAX_LEVEL`. Chosen from the menu before
+    /// starting a game; see `keres_engine::engine::SearchConfig::for_level`.
+    pub level: u8,
     /// Applied moves with whether each was a capture, for the history panel.
     pub history: Vec<(Move, bool)>,
     undo_stack: Vec<(Move, keres_engine::UndoInfo)>,
@@ -59,6 +62,10 @@ impl App {
             flipped: false,
             show_threats: true,
             show_coords: true,
+            // Matches the old fixed-depth-4, always-play-the-best-move
+            // behavior exactly (see `SearchConfig::for_level`), so anyone
+            // who never touches the difficulty slider sees no change.
+            level: 9,
             history: Vec::new(),
             undo_stack: Vec::new(),
         }
@@ -125,13 +132,10 @@ impl App {
         if self.is_ai_turn() {
             self.ai_thinking = true;
             let game_clone = self.game.clone();
+            let config = self.ai_search_config();
             let (tx, rx) = mpsc::channel();
             thread::spawn(move || {
-                let mv = keres_engine::engine::find_best_move(
-                    &game_clone,
-                    Self::ai_search_config(),
-                    None,
-                );
+                let mv = keres_engine::engine::find_best_move(&game_clone, config, None);
                 let _ = tx.send(mv);
             });
             self.ai_rx = Some(rx);
@@ -141,14 +145,15 @@ impl App {
     // The default full-depth search can take longer than a shared CI
     // runner's CPU budget allows, which made timing-based tests below
     // flaky. Tests only care that a move is produced and applied, so they
-    // use a shallow depth; real gameplay keeps the full-strength default.
+    // use a shallow depth regardless of the chosen level; real gameplay
+    // uses the level-derived config.
     #[cfg(not(test))]
-    fn ai_search_config() -> Option<keres_engine::engine::SearchConfig> {
-        None
+    fn ai_search_config(&self) -> Option<keres_engine::engine::SearchConfig> {
+        Some(keres_engine::engine::SearchConfig::for_level(self.level))
     }
 
     #[cfg(test)]
-    fn ai_search_config() -> Option<keres_engine::engine::SearchConfig> {
+    fn ai_search_config(&self) -> Option<keres_engine::engine::SearchConfig> {
         Some(keres_engine::engine::SearchConfig {
             max_depth: 2,
             ..Default::default()
@@ -240,6 +245,13 @@ impl App {
 
     pub fn toggle_coords(&mut self) {
         self.show_coords = !self.show_coords;
+    }
+
+    pub fn set_level(&mut self, level: u8) {
+        self.level = level.clamp(
+            keres_engine::engine::constants::MIN_LEVEL,
+            keres_engine::engine::constants::MAX_LEVEL,
+        );
     }
 
     pub fn can_undo(&self) -> bool {

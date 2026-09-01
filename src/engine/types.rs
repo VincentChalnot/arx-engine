@@ -22,7 +22,9 @@ pub struct SearchResult {
     pub best_move: Option<Move>,
 }
 
-/// Configuration flags that can disable individual engine features.
+/// Configuration flags that can disable individual engine features, plus the
+/// dials that control how much the root move choice deviates from the
+/// engine's true best move (see `for_level`).
 #[derive(Clone, Debug)]
 pub struct SearchConfig {
     /// Enable transposition table.
@@ -35,6 +37,19 @@ pub struct SearchConfig {
     pub use_killers: bool,
     /// Maximum search depth.
     pub max_depth: usize,
+    /// Softmax temperature (in eval-score units) used when picking the root
+    /// move. `0.0` always plays the true best move (deterministic argmax).
+    /// Above `0.0`, other root moves get picked with probability that decays
+    /// the further their score is below the best — see
+    /// `search::select_root_move`. Every root move is already searched to
+    /// full depth independently (see `root_search`), so this costs no extra
+    /// search time; it only changes which of the already-computed scores
+    /// gets played.
+    pub noise_temperature: f32,
+    /// Probability `[0.0, 1.0]` of ignoring the search result entirely and
+    /// playing a uniformly random legal root move instead — an outright
+    /// blunder, independent of `noise_temperature`.
+    pub blunder_chance: f32,
 }
 
 impl Default for SearchConfig {
@@ -45,6 +60,59 @@ impl Default for SearchConfig {
             use_quiescence: true,
             use_killers: true,
             max_depth: crate::engine::constants::MAX_DEPTH,
+            noise_temperature: 0.0,
+            blunder_chance: 0.0,
+        }
+    }
+}
+
+impl SearchConfig {
+    /// Build a config for an engine strength `level`, clamped to
+    /// `[MIN_LEVEL, MAX_LEVEL]`. This is the single place that maps a
+    /// user-facing difficulty knob onto engine feature flags, so new dials
+    /// get added here rather than scattered across callers.
+    ///
+    /// `use_tt` and `use_alpha_beta` stay on regardless of level: both are
+    /// transparent optimizations that only affect search speed, not the
+    /// move the engine picks, so disabling them would not weaken play —
+    /// only slow it down.
+    ///
+    /// The other levers all ease off together as level increases. Levels
+    /// `1..=MAX_LEVEL-1` ramp linearly from "complete beginner" (level 1:
+    /// depth 1, heavy noise and blunders) up to "one ply short of full
+    /// strength" (`MAX_LEVEL-1`: depth 4, zero noise) — that linear ramp is
+    /// deliberately soft since a full extra search ply roughly multiplies
+    /// both search time and playing strength, so depth increases are spaced
+    /// out and `noise_temperature`/`blunder_chance` fill the gaps between
+    /// them. `MAX_LEVEL` itself is a step above that ramp (depth 5, still no
+    /// noise) — the "no mercy" top tier — which reproduces the old
+    /// always-play-the-best-move-at-full-depth behavior exactly.
+    ///
+    /// Quiescence/killers switch on once `max_depth >= 3`: below that the
+    /// search is already so shallow that the extra tactical accuracy they
+    /// buy just makes it feel erratic rather than weak.
+    pub fn for_level(level: u8) -> Self {
+        use crate::engine::constants::{MAX_LEVEL, MIN_LEVEL};
+        let level = level.clamp(MIN_LEVEL, MAX_LEVEL);
+
+        let (max_depth, noise_temperature, blunder_chance) = if level == MAX_LEVEL {
+            (5, 0.0, 0.0)
+        } else {
+            // 0.0 at level 1, 1.0 at level `MAX_LEVEL - 1`.
+            let t = (level - 1) as f32 / (MAX_LEVEL - 2) as f32;
+            let max_depth = 1 + (t * 3.0).floor() as usize; // 1..=4
+            (max_depth, 35.0 * (1.0 - t), 0.20 * (1.0 - t))
+        };
+        let use_quiescence_and_killers = max_depth >= 3;
+
+        SearchConfig {
+            use_tt: true,
+            use_alpha_beta: true,
+            use_quiescence: use_quiescence_and_killers,
+            use_killers: use_quiescence_and_killers,
+            max_depth,
+            noise_temperature,
+            blunder_chance,
         }
     }
 }
@@ -86,6 +154,61 @@ mod tests {
         assert!(cfg.use_alpha_beta);
         assert!(cfg.use_quiescence);
         assert!(cfg.use_killers);
+    }
+
+    #[test]
+    fn for_level_gates_quiescence_and_killers_on_depth() {
+        for level in 1..=10u8 {
+            let cfg = SearchConfig::for_level(level);
+            assert_eq!(cfg.use_quiescence, cfg.max_depth >= 3);
+            assert_eq!(cfg.use_killers, cfg.max_depth >= 3);
+            assert!(cfg.use_tt);
+            assert!(cfg.use_alpha_beta);
+        }
+    }
+
+    #[test]
+    fn for_level_matches_the_documented_anchor_points() {
+        // Level 1: complete beginner.
+        let l1 = SearchConfig::for_level(1);
+        assert_eq!(l1.max_depth, 1);
+        assert_eq!(l1.noise_temperature, 35.0);
+        assert_eq!(l1.blunder_chance, 0.20);
+
+        // Level 9: one ply short of full strength, noise/blunder already at 0.
+        let l9 = SearchConfig::for_level(9);
+        assert_eq!(l9.max_depth, 4);
+        assert_eq!(l9.noise_temperature, 0.0);
+        assert_eq!(l9.blunder_chance, 0.0);
+
+        // Level 10 (MAX_LEVEL): full strength, one ply deeper than level 9.
+        let l10 = SearchConfig::for_level(10);
+        assert_eq!(l10.max_depth, 5);
+        assert_eq!(l10.noise_temperature, 0.0);
+        assert_eq!(l10.blunder_chance, 0.0);
+    }
+
+    #[test]
+    fn for_level_clamps_out_of_range_values() {
+        assert_eq!(SearchConfig::for_level(0).max_depth, 1);
+        assert_eq!(SearchConfig::for_level(11).max_depth, 5);
+    }
+
+    #[test]
+    fn for_level_depth_noise_and_blunder_chance_are_monotonic_across_the_full_scale() {
+        let mut prev_depth = 0;
+        let mut prev_temp = f32::MAX;
+        let mut prev_blunder = f32::MAX;
+        for level in 1..=10u8 {
+            let cfg = SearchConfig::for_level(level);
+            assert!(cfg.max_depth >= prev_depth);
+            assert!(cfg.noise_temperature <= prev_temp);
+            assert!(cfg.blunder_chance <= prev_blunder);
+            assert!((0.0..=1.0).contains(&cfg.blunder_chance));
+            prev_depth = cfg.max_depth;
+            prev_temp = cfg.noise_temperature;
+            prev_blunder = cfg.blunder_chance;
+        }
     }
 
     #[test]
