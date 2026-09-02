@@ -77,16 +77,19 @@ impl SearchConfig {
     /// move the engine picks, so disabling them would not weaken play —
     /// only slow it down.
     ///
-    /// The other levers all ease off together as level increases. Levels
-    /// `1..=MAX_LEVEL-1` ramp linearly from "complete beginner" (level 1:
-    /// depth 1, heavy noise and blunders) up to "one ply short of full
-    /// strength" (`MAX_LEVEL-1`: depth 4, zero noise) — that linear ramp is
-    /// deliberately soft since a full extra search ply roughly multiplies
-    /// both search time and playing strength, so depth increases are spaced
-    /// out and `noise_temperature`/`blunder_chance` fill the gaps between
-    /// them. `MAX_LEVEL` itself is a step above that ramp (depth 5, still no
-    /// noise) — the "no mercy" top tier — which reproduces the old
-    /// always-play-the-best-move-at-full-depth behavior exactly.
+    /// `noise_temperature` and `blunder_chance` ease off together as level
+    /// increases, ramping linearly from "complete beginner" (level 1: heavy
+    /// noise and blunders) down to zero at `MAX_LEVEL - 1`. `max_depth` ramps
+    /// on its own, separately-spaced schedule: two levels per ply, from depth
+    /// 1 at levels 1-2 up to depth 4 by level 7 — evenly distributing the
+    /// jumps in playing strength that an extra search ply brings across the
+    /// whole 1..=MAX_LEVEL-1 range, rather than bunching them at the top.
+    /// Levels 7-9 all sit at depth 4 and are told apart purely by their
+    /// (still-decreasing) noise and blunder chance, landing on zero at
+    /// `MAX_LEVEL - 1` — "one ply short of full strength". `MAX_LEVEL` itself
+    /// is a step above that ramp (depth 5, still no noise) — the "no mercy"
+    /// top tier — which reproduces the old always-play-the-best-move-at-
+    /// full-depth behavior exactly.
     ///
     /// Quiescence/killers switch on once `max_depth >= 3`: below that the
     /// search is already so shallow that the extra tactical accuracy they
@@ -100,7 +103,9 @@ impl SearchConfig {
         } else {
             // 0.0 at level 1, 1.0 at level `MAX_LEVEL - 1`.
             let t = (level - 1) as f32 / (MAX_LEVEL - 2) as f32;
-            let max_depth = 1 + (t * 3.0).floor() as usize; // 1..=4
+            // Two levels per ply: 1-2 -> depth 1, 3-4 -> depth 2, ...,
+            // capped at depth 4 (reached at level 7 and held through 9).
+            let max_depth = 1 + (((level - 1) / 2) as usize).min(3);
             (max_depth, 35.0 * (1.0 - t), 0.20 * (1.0 - t))
         };
         let use_quiescence_and_killers = max_depth >= 3;
@@ -186,6 +191,22 @@ mod tests {
         assert_eq!(l10.max_depth, 5);
         assert_eq!(l10.noise_temperature, 0.0);
         assert_eq!(l10.blunder_chance, 0.0);
+    }
+
+    #[test]
+    fn for_level_spreads_depth_increases_two_levels_per_ply() {
+        // Levels 1-9 map onto depth 1..=4 two levels at a time (level 9
+        // shares depth 4 with 7-8, told apart only by noise/blunder), rather
+        // than bunching most levels at low depth and jumping late.
+        let expected_depths = [1, 1, 2, 2, 3, 3, 4, 4, 4];
+        for (i, &expected) in expected_depths.iter().enumerate() {
+            let level = (i + 1) as u8;
+            assert_eq!(
+                SearchConfig::for_level(level).max_depth,
+                expected,
+                "level {level}"
+            );
+        }
     }
 
     #[test]

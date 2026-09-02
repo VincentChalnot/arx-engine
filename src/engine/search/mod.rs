@@ -126,8 +126,18 @@ pub fn root_search(
     // move searched to full depth, so `select_root_move` picks among
     // already-computed scores — see `SearchConfig::noise_temperature` /
     // `blunder_chance` for what makes it deviate from the true best move.
+    let is_king_move: Vec<bool> = root_moves
+        .iter()
+        .map(|mv| {
+            game.board
+                .get_piece(&mv.from)
+                .map(|p| p.is_king())
+                .unwrap_or(false)
+        })
+        .collect();
+
     let mut rng = Rng::new();
-    let (best_move, best_score) = select_root_move(&results, config, &mut rng)
+    let (best_move, best_score) = select_root_move(&results, &is_king_move, config, &mut rng)
         .map(|(mv, s)| (Some(mv), s))
         .unwrap_or((None, -crate::engine::constants::KING_VALUE));
 
@@ -157,24 +167,49 @@ pub fn root_search(
 /// the highest-scoring move, unchanged from a plain `max_by_key`.
 ///
 /// Otherwise, first roll for an outright blunder (`blunder_chance`): ignore
-/// every score and play a uniformly random legal move. Failing that, apply
-/// softmax noise at `noise_temperature`: every move gets picked with
-/// probability proportional to `exp((score - best_score) / temperature)`, so
-/// the true best move is always the likeliest pick, nearby-scoring moves get
-/// a real chance, and clearly worse ones fade out fast without a hard
-/// cutoff.
+/// every score and play a random legal move, weighted so a king move is
+/// `constants::KING_BLUNDER_WEIGHT` times as likely to be picked as any
+/// other piece's move — the engine should still occasionally hang a rook or
+/// a bishop, but it shouldn't stroll its king into danger nearly as often.
+/// Failing that, apply softmax noise at `noise_temperature`: every move gets
+/// picked with probability proportional to
+/// `exp((score - best_score) / temperature)`, so the true best move is
+/// always the likeliest pick, nearby-scoring moves get a real chance, and
+/// clearly worse ones fade out fast without a hard cutoff.
+///
+/// `is_king_move` must be the same length as `results`, `is_king_move[i]`
+/// saying whether `results[i]`'s move moves the king.
 fn select_root_move(
     results: &[(Move, i32)],
+    is_king_move: &[bool],
     config: &SearchConfig,
     rng: &mut Rng,
 ) -> Option<(Move, i32)> {
     if results.is_empty() {
         return None;
     }
+    debug_assert_eq!(results.len(), is_king_move.len());
 
     if config.blunder_chance > 0.0 && rng.next_f32() < config.blunder_chance {
-        let idx = ((rng.next_f32() * results.len() as f32) as usize).min(results.len() - 1);
-        return Some(results[idx]);
+        let weights: Vec<f32> = is_king_move
+            .iter()
+            .map(|&is_king| {
+                if is_king {
+                    crate::engine::constants::KING_BLUNDER_WEIGHT
+                } else {
+                    1.0
+                }
+            })
+            .collect();
+        let total: f32 = weights.iter().sum();
+        let mut pick = rng.next_f32() * total;
+        for (i, &w) in weights.iter().enumerate() {
+            pick -= w;
+            if pick <= 0.0 {
+                return Some(results[i]);
+            }
+        }
+        return results.last().copied();
     }
 
     let best_score = results.iter().map(|&(_, s)| s).max().unwrap();
@@ -352,13 +387,18 @@ mod tests {
         ]
     }
 
+    fn no_king_moves(results: &[(Move, i32)]) -> Vec<bool> {
+        vec![false; results.len()]
+    }
+
     #[test]
     fn select_root_move_is_deterministic_argmax_at_zero_noise() {
         let results = fake_results();
+        let king_flags = no_king_moves(&results);
         let config = SearchConfig::default(); // noise_temperature == 0.0, blunder_chance == 0.0
         for seed in 0..20u64 {
             let mut rng = Rng::seeded(seed + 1);
-            let (_, score) = select_root_move(&results, &config, &mut rng).unwrap();
+            let (_, score) = select_root_move(&results, &king_flags, &config, &mut rng).unwrap();
             assert_eq!(score, 30);
         }
     }
@@ -366,6 +406,7 @@ mod tests {
     #[test]
     fn select_root_move_always_blunders_at_full_blunder_chance() {
         let results = fake_results();
+        let king_flags = no_king_moves(&results);
         let config = SearchConfig {
             blunder_chance: 1.0,
             ..Default::default()
@@ -373,7 +414,7 @@ mod tests {
         let mut rng = Rng::seeded(7);
         let mut saw_non_best = false;
         for _ in 0..50 {
-            let (_, score) = select_root_move(&results, &config, &mut rng).unwrap();
+            let (_, score) = select_root_move(&results, &king_flags, &config, &mut rng).unwrap();
             assert!(results.iter().any(|&(_, s)| s == score));
             if score != 30 {
                 saw_non_best = true;
@@ -388,6 +429,7 @@ mod tests {
     #[test]
     fn select_root_move_with_noise_sometimes_picks_a_non_best_move() {
         let results = fake_results();
+        let king_flags = no_king_moves(&results);
         let config = SearchConfig {
             noise_temperature: 15.0,
             ..Default::default()
@@ -395,7 +437,7 @@ mod tests {
         let mut rng = Rng::seeded(99);
         let mut saw_non_best = false;
         for _ in 0..200 {
-            let (_, score) = select_root_move(&results, &config, &mut rng).unwrap();
+            let (_, score) = select_root_move(&results, &king_flags, &config, &mut rng).unwrap();
             assert!(results.iter().any(|&(_, s)| s == score));
             if score != 30 {
                 saw_non_best = true;
@@ -411,6 +453,65 @@ mod tests {
     fn select_root_move_returns_none_for_empty_results() {
         let config = SearchConfig::default();
         let mut rng = Rng::seeded(3);
-        assert!(select_root_move(&[], &config, &mut rng).is_none());
+        assert!(select_root_move(&[], &[], &config, &mut rng).is_none());
+    }
+
+    #[test]
+    fn select_root_move_blunders_the_king_far_less_often_than_other_pieces() {
+        // Three moves tied in score (no softmax preference), one of which
+        // moves the king. Under full blunder chance the king move should be
+        // picked roughly `KING_BLUNDER_WEIGHT` as often as either other move,
+        // not with equal 1/3 odds each.
+        let results = vec![
+            (
+                Move {
+                    from: Position::new(0, 0),
+                    to: Position::new(0, 1),
+                    unstack: false,
+                },
+                10,
+            ),
+            (
+                Move {
+                    from: Position::new(1, 0),
+                    to: Position::new(1, 1),
+                    unstack: false,
+                },
+                10,
+            ),
+            (
+                Move {
+                    from: Position::new(2, 0),
+                    to: Position::new(2, 1),
+                    unstack: false,
+                },
+                10,
+            ),
+        ];
+        let king_flags = vec![true, false, false];
+        let config = SearchConfig {
+            blunder_chance: 1.0,
+            ..Default::default()
+        };
+        let mut rng = Rng::seeded(42);
+        let mut king_picks = 0;
+        let mut other_picks = 0;
+        const TRIALS: usize = 20_000;
+        for _ in 0..TRIALS {
+            let (mv, _) = select_root_move(&results, &king_flags, &config, &mut rng).unwrap();
+            if mv.from == Position::new(0, 0) {
+                king_picks += 1;
+            } else {
+                other_picks += 1;
+            }
+        }
+        // Expected share: king weight 0.2 out of total 2.2 -> ~9.1%. Each
+        // other move: 1.0 / 2.2 -> ~45.5%. Allow generous statistical slack.
+        let king_share = king_picks as f32 / TRIALS as f32;
+        assert!(
+            king_share > 0.05 && king_share < 0.14,
+            "expected king pick share near 9%, got {king_share} ({king_picks}/{TRIALS})"
+        );
+        assert!(other_picks > 0);
     }
 }
