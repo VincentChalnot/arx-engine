@@ -18,6 +18,7 @@ pub enum Screen {
     Menu,
     Playing,
     GameOver,
+    LoadGame,
 }
 
 pub struct PendingChoice {
@@ -57,6 +58,12 @@ pub struct App {
     /// Applied moves with whether each was a capture, for the history panel.
     pub history: Vec<(Move, bool)>,
     undo_stack: Vec<(Move, keres_engine::UndoInfo)>,
+    /// File the current game is (or will be, once the first move lands)
+    /// autosaved to — fixed for the life of the game, see `crate::save`.
+    /// `None` on the menu, before any game has started or been resumed.
+    save_path: Option<std::path::PathBuf>,
+    /// Populated by `open_load_screen`, rendered by the LOAD GAME screen.
+    pub load_entries: Vec<crate::save::SaveEntry>,
 }
 
 impl App {
@@ -83,6 +90,8 @@ impl App {
             level: 9,
             history: Vec::new(),
             undo_stack: Vec::new(),
+            save_path: None,
+            load_entries: Vec::new(),
         }
     }
 
@@ -101,13 +110,44 @@ impl App {
         self.history.clear();
         self.undo_stack.clear();
         self.screen = Screen::Playing;
-        crate::save::clear();
+        self.save_path = Some(crate::save::new_path(mode));
         self.maybe_start_ai();
     }
 
-    /// Rebuild a game from a saved (mode, move list) pair, replaying every
-    /// move so history/undo state and any in-progress AI turn are correct.
-    pub fn resume_game(&mut self, mode: Mode, moves: Vec<Move>) {
+    /// Open the LOAD GAME screen, listing every game found in the save
+    /// folder (newest first).
+    pub fn open_load_screen(&mut self) {
+        self.load_entries = crate::save::list();
+        self.screen = Screen::LoadGame;
+    }
+
+    /// Leave the LOAD GAME screen without resuming anything.
+    pub fn close_load_screen(&mut self) {
+        self.screen = Screen::Menu;
+    }
+
+    /// Resume the `index`-th entry from the last `open_load_screen` listing.
+    /// Ignored if the index is out of range or the file can no longer be
+    /// read (e.g. deleted or corrupted since the listing was built).
+    pub fn load_selected(&mut self, index: usize) {
+        let Some(entry) = self.load_entries.get(index) else {
+            return;
+        };
+        let path = entry.path.clone();
+        if let Some(record) = crate::save::load(&path) {
+            self.save_path = Some(path);
+            self.level = record.level;
+            self.resume_game(record.mode, record.moves, record.status);
+        }
+    }
+
+    /// Rebuild a game from a saved (mode, move list, outcome) triple,
+    /// replaying every move so history/undo state and any in-progress AI
+    /// turn are correct. Checkmate/draw are naturally reflected in
+    /// `self.game` by replaying the moves, but resignation isn't — nothing
+    /// in the move list records it — so `status` is applied explicitly
+    /// afterwards to avoid e.g. resuming a resigned game as still playable.
+    fn resume_game(&mut self, mode: Mode, moves: Vec<Move>, status: crate::save::Status) {
         self.mode = mode;
         self.game = Game::new();
         self.selected = None;
@@ -134,7 +174,33 @@ impl App {
             self.undo_stack.push((mv, undo));
             self.last_move = Some(mv);
         }
-        self.maybe_start_ai();
+        match status {
+            crate::save::Status::WhiteResigned => {
+                self.game.set_game_over(true, false, false);
+                self.screen = Screen::GameOver;
+            }
+            crate::save::Status::BlackResigned => {
+                self.game.set_game_over(true, true, false);
+                self.screen = Screen::GameOver;
+            }
+            _ => self.maybe_start_ai(),
+        }
+    }
+
+    /// The current position's outcome, for the autosave header. Checkmate
+    /// and draw fall straight out of `Game`; resignation is never reflected
+    /// here since it isn't a board state — callers that resign must pass
+    /// the resignation status to `crate::save::save` themselves.
+    fn outcome_status(&self) -> crate::save::Status {
+        if !self.game.is_game_over() {
+            crate::save::Status::InProgress
+        } else if self.game.is_draw() {
+            crate::save::Status::Draw
+        } else if self.game.white_wins() {
+            crate::save::Status::WhiteWinsCheckmate
+        } else {
+            crate::save::Status::BlackWinsCheckmate
+        }
     }
 
     pub fn is_ai_turn(&self) -> bool {
@@ -148,7 +214,6 @@ impl App {
     fn maybe_start_ai(&mut self) {
         if self.game.is_game_over() {
             self.screen = Screen::GameOver;
-            crate::save::clear();
             return;
         }
         if self.is_ai_turn() {
@@ -220,12 +285,13 @@ impl App {
         self.selected = None;
         self.legal.clear();
         self.pending = None;
+        if let Some(path) = &self.save_path {
+            let moves: Vec<Move> = self.history.iter().map(|(m, _)| *m).collect();
+            crate::save::save(path, self.mode, self.level, self.outcome_status(), &moves);
+        }
         if self.game.is_game_over() {
             self.screen = Screen::GameOver;
-            crate::save::clear();
         } else {
-            let moves: Vec<Move> = self.history.iter().map(|(m, _)| *m).collect();
-            crate::save::save(self.mode, &moves);
             self.maybe_start_ai();
         }
     }
@@ -252,11 +318,13 @@ impl App {
         self.legal.clear();
         self.pending = None;
         self.screen = Screen::Playing;
-        if self.history.is_empty() {
-            crate::save::clear();
-        } else {
-            let moves: Vec<Move> = self.history.iter().map(|(m, _)| *m).collect();
-            crate::save::save(self.mode, &moves);
+        if let Some(path) = &self.save_path {
+            if self.history.is_empty() {
+                crate::save::delete(path);
+            } else {
+                let moves: Vec<Move> = self.history.iter().map(|(m, _)| *m).collect();
+                crate::save::save(path, self.mode, self.level, self.outcome_status(), &moves);
+            }
         }
     }
 
@@ -271,7 +339,15 @@ impl App {
         self.screen = Screen::GameOver;
         self.ai_rx = None;
         self.ai_thinking = false;
-        crate::save::clear();
+        if let Some(path) = &self.save_path {
+            let status = if resigning == Color::White {
+                crate::save::Status::WhiteResigned
+            } else {
+                crate::save::Status::BlackResigned
+            };
+            let moves: Vec<Move> = self.history.iter().map(|(m, _)| *m).collect();
+            crate::save::save(path, self.mode, self.level, status, &moves);
+        }
     }
 
     pub fn toggle_flip(&mut self) {
@@ -656,8 +732,7 @@ mod tests {
 
     #[test]
     fn save_and_resume_round_trip_reproduces_the_position() {
-        crate::save::set_test_path_override(std::env::temp_dir().join("keres_test_save_app.bin"));
-        crate::save::clear();
+        crate::save::set_test_dir_override(std::env::temp_dir().join("keres_test_save_app"));
         let mut app = App::new();
         app.start_game(Mode::Hotseat);
         app.click_square(Position::new(2, 6));
@@ -667,13 +742,78 @@ mod tests {
         let expected_hash = app.game.board_hash();
         let expected_history_len = app.history.len();
 
-        let (mode, moves) = crate::save::load().expect("apply_move should have autosaved");
-        assert_eq!(mode, Mode::Hotseat);
+        let path = app.save_path.clone().expect("game should have a save path");
+        let record = crate::save::load(&path).expect("apply_move should have autosaved");
+        assert_eq!(record.mode, Mode::Hotseat);
+        assert_eq!(record.status, crate::save::Status::InProgress);
 
         let mut resumed = App::new();
-        resumed.resume_game(mode, moves);
+        resumed.resume_game(record.mode, record.moves, record.status);
         assert_eq!(resumed.game.board_hash(), expected_hash);
         assert_eq!(resumed.history.len(), expected_history_len);
-        crate::save::clear();
+        crate::save::delete(&path);
+    }
+
+    #[test]
+    fn resign_persists_a_resignation_status_that_resume_honors() {
+        crate::save::set_test_dir_override(std::env::temp_dir().join("keres_test_save_resign"));
+        let mut app = App::new();
+        app.start_game(Mode::Hotseat); // White to move
+        app.click_square(Position::new(2, 6));
+        app.click_square(Position::new(1, 5));
+        let path = app.save_path.clone().expect("game should have a save path");
+        app.resign(); // Black resigns (it's Black's move after White's 1st)
+
+        let record = crate::save::load(&path).expect("resign should have autosaved");
+        assert_eq!(record.status, crate::save::Status::BlackResigned);
+
+        let mut resumed = App::new();
+        resumed.resume_game(record.mode, record.moves, record.status);
+        assert_eq!(
+            resumed.screen,
+            Screen::GameOver,
+            "a resumed resignation must not look like an in-progress game"
+        );
+        assert!(resumed.game.is_game_over());
+        assert!(
+            resumed.game.white_wins(),
+            "White should win on Black's resignation"
+        );
+        crate::save::delete(&path);
+    }
+
+    #[test]
+    fn load_screen_lists_and_resumes_a_saved_game() {
+        crate::save::set_test_dir_override(
+            std::env::temp_dir().join("keres_test_save_load_screen"),
+        );
+        let mut app = App::new();
+        app.start_game(Mode::VsAiBlack);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while app.ai_thinking && Instant::now() < deadline {
+            app.poll_ai();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let path = app.save_path.clone().expect("game should have a save path");
+        app.back_to_menu();
+
+        let mut fresh = App::new();
+        fresh.open_load_screen();
+        assert_eq!(fresh.screen, Screen::LoadGame);
+        assert!(
+            fresh.load_entries.iter().any(|e| e.path == path),
+            "the saved game should appear in the listing"
+        );
+        let index = fresh
+            .load_entries
+            .iter()
+            .position(|e| e.path == path)
+            .unwrap();
+        fresh.load_selected(index);
+        assert_eq!(fresh.screen, Screen::Playing);
+        assert_eq!(fresh.mode, Mode::VsAiBlack);
+        assert_eq!(fresh.history.len(), 1);
+
+        crate::save::delete(&path);
     }
 }

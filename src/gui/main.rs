@@ -101,16 +101,84 @@ fn menu_level_boxes(show_coords: bool) -> [Rect; 10] {
     })
 }
 
-fn menu_resume_button(show_coords: bool) -> Rect {
+fn menu_load_button(show_coords: bool) -> Rect {
     let bw = 460;
     let bh = 52;
     let cx = render::logical_w(show_coords) / 2;
-    let top = 260 + 3 * (bh + 16) + 20;
+    // 12px below the 3rd mode button (260 + 3*bh + 2*16 = 448), leaving
+    // enough room above the "ESC TO QUIT" line at the bottom of the screen
+    // (see draw_menu) that the two never overlap.
+    let top = 260 + 3 * bh + 2 * 16 + 12;
     Rect {
         x0: cx - bw / 2,
         y0: top,
         x1: cx + bw / 2,
         y1: top + bh,
+    }
+}
+
+const LOAD_ROW_W: i32 = 560;
+const LOAD_ROW_H: i32 = 44;
+const LOAD_ROW_GAP: i32 = 8;
+const LOAD_LIST_TOP: i32 = 130;
+const LOAD_BOTTOM_PAD: i32 = 90;
+
+fn load_row_rect(index: i32, show_coords: bool) -> Rect {
+    let cx = render::logical_w(show_coords) / 2;
+    let y0 = LOAD_LIST_TOP + index * (LOAD_ROW_H + LOAD_ROW_GAP);
+    Rect {
+        x0: cx - LOAD_ROW_W / 2,
+        y0,
+        x1: cx + LOAD_ROW_W / 2,
+        y1: y0 + LOAD_ROW_H,
+    }
+}
+
+fn load_visible_rows(show_coords: bool) -> i32 {
+    let lh = render::logical_h(show_coords);
+    ((lh - LOAD_LIST_TOP - LOAD_BOTTOM_PAD) / (LOAD_ROW_H + LOAD_ROW_GAP)).max(1)
+}
+
+fn load_back_button_rect(show_coords: bool) -> Rect {
+    let bw = 200;
+    let bh = 44;
+    let cx = render::logical_w(show_coords) / 2;
+    let lh = render::logical_h(show_coords);
+    Rect {
+        x0: cx - bw / 2,
+        y0: lh - LOAD_BOTTOM_PAD + 20,
+        x1: cx + bw / 2,
+        y1: lh - LOAD_BOTTOM_PAD + 20 + bh,
+    }
+}
+
+/// `YYYYMMDDHHMMSS` (as parsed from a save filename) to `YYYY-MM-DD
+/// HH:MM:SS` for display.
+fn format_save_timestamp(ts: &str) -> String {
+    if ts.len() != 14 {
+        return ts.to_string();
+    }
+    format!(
+        "{}-{}-{} {}:{}:{}",
+        &ts[0..4],
+        &ts[4..6],
+        &ts[6..8],
+        &ts[8..10],
+        &ts[10..12],
+        &ts[12..14]
+    )
+}
+
+/// Unix seconds (UTC) to `YYYY-MM-DD HH:MM:SS` for display.
+fn format_unix_timestamp(secs: i64) -> String {
+    format_save_timestamp(&save::format_timestamp(secs))
+}
+
+fn side_label(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Hotseat => "HOTSEAT",
+        Mode::VsAiWhite => "WHITE (VS AI)",
+        Mode::VsAiBlack => "BLACK (VS AI)",
     }
 }
 
@@ -329,18 +397,67 @@ fn draw_menu(c: &mut Canvas, show_coords: bool, level: u8) {
         c.stroke_rect(rect.x0, rect.y0, rect.x1, rect.y1, 2, render::COL_STATUS);
         c.draw_text_centered(rect.cx(), rect.cy() - 5, label, 1, render::COL_STATUS);
     }
-    if save::exists() {
-        let rect = menu_resume_button(show_coords);
+    if save::any_exist() {
+        let rect = menu_load_button(show_coords);
         c.stroke_rect(rect.x0, rect.y0, rect.x1, rect.y1, 2, render::COL_SELECT);
         c.draw_text_centered(
             rect.cx(),
             rect.cy() - 5,
-            "4: RESUME SAVED GAME",
+            "4: LOAD GAME",
             1,
             render::COL_SELECT,
         );
     }
     c.draw_text_centered(lw / 2, lh - 30, "ESC TO QUIT", 1, render::COL_COORD);
+}
+
+fn draw_load_screen(c: &mut Canvas, app: &App, scroll: i32) {
+    let show_coords = app.show_coords;
+    let lw = render::logical_w(show_coords);
+    let lh = render::logical_h(show_coords);
+    c.fill_rect(0, 0, lw, lh, render::COL_PAGE_BG);
+    c.draw_text_centered(lw / 2, 50, "LOAD GAME", 4, render::COL_STATUS);
+
+    if app.load_entries.is_empty() {
+        c.draw_text_centered(lw / 2, lh / 2, "NO SAVED GAMES", 1, render::COL_COORD);
+    } else {
+        let visible = load_visible_rows(show_coords);
+        let max_scroll = (app.load_entries.len() as i32 - visible).max(0);
+        let scroll = scroll.clamp(0, max_scroll);
+        for (row, entry) in app
+            .load_entries
+            .iter()
+            .skip(scroll as usize)
+            .take(visible as usize)
+            .enumerate()
+        {
+            let rect = load_row_rect(row as i32, show_coords);
+            let over = entry.status != save::Status::InProgress;
+            let color = if over {
+                render::COL_COORD
+            } else {
+                render::COL_STATUS
+            };
+            c.stroke_rect(rect.x0, rect.y0, rect.x1, rect.y1, 2, color);
+            let side = side_label(entry.mode);
+            let top = if entry.mode == Mode::Hotseat {
+                format!("{}   {}", side, entry.status.label())
+            } else {
+                format!("{}   LVL {}   {}", side, entry.level, entry.status.label())
+            };
+            c.draw_text(rect.x0 + 14, rect.y0 + 6, &top, 1, color);
+            let bottom = format!(
+                "START {}   LAST {}",
+                format_save_timestamp(&entry.started),
+                format_unix_timestamp(entry.last_move)
+            );
+            c.draw_text(rect.x0 + 14, rect.y0 + 24, &bottom, 1, render::COL_COORD);
+        }
+    }
+
+    let back = load_back_button_rect(show_coords);
+    render::draw_button(c, back.x0, back.y0, back.x1, back.y1, "BACK", true);
+    c.draw_text_centered(lw / 2, lh - 20, "ESC TO GO BACK", 1, render::COL_COORD);
 }
 
 fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32) {
@@ -662,15 +779,24 @@ fn snapshot_mouse() -> Option<(i32, i32)> {
 /// Headless render-to-file path used only for local visual verification
 /// (`KERES_SNAPSHOT=<path>.ppm KERES_SCREEN=menu|playing|selected|stacked|
 /// gameover|flipped|threats|history|nocoords|hover_friendly|hover_threat|
-/// hover_stack|last_move|confirm_menu|stacked_close_hover`, optionally with
-/// `KERES_MOUSE=x,y` to check dialog-button hover). Never touches a window
-/// or the real display.
+/// hover_stack|last_move|confirm_menu|stacked_close_hover|load_game`,
+/// optionally with `KERES_MOUSE=x,y` to check dialog-button hover). Never
+/// touches a window or the real display; save I/O is redirected to a throwaway
+/// temp directory so it never writes into the developer's real save folder.
 fn run_snapshot(path: &str) {
     use keres_engine::{Board, Color, PieceType};
+    save::set_test_dir_override(std::env::temp_dir().join("keres_snapshot_saves"));
     let mut app = App::new();
     let screen = std::env::var("KERES_SCREEN").unwrap_or_else(|_| "menu".to_string());
     match screen.as_str() {
         "menu" => {}
+        "load_game" => {
+            app.start_game(Mode::Hotseat);
+            app.click_square(Position::new(2, 6));
+            app.click_square(Position::new(1, 5));
+            app.back_to_menu();
+            app.open_load_screen();
+        }
         "playing" => app.start_game(Mode::Hotseat),
         "selected" => {
             app.start_game(Mode::Hotseat);
@@ -846,6 +972,7 @@ fn run_snapshot(path: &str) {
         Screen::Menu => draw_menu(&mut canvas, app.show_coords, app.level),
         Screen::Playing => draw_board(&mut canvas, &app, 0, snapshot_mouse()),
         Screen::GameOver => draw_game_over(&mut canvas, &app, 0),
+        Screen::LoadGame => draw_load_screen(&mut canvas, &app, 0),
     }
     write_ppm(path, &buffer, lw, lh);
 }
@@ -874,6 +1001,7 @@ fn main() {
     let mut output: Vec<u32> = Vec::new();
     let mut prev_mouse_down = false;
     let mut history_scroll: i32 = 0;
+    let mut load_scroll: i32 = 0;
     // ESC never quits directly except from the main menu: from a game in
     // progress it opens the return-to-menu confirmation instead (see
     // App::request_menu_confirm), so the window close is driven by this flag
@@ -918,9 +1046,18 @@ fn main() {
         }
 
         if let Some((_, dy)) = window.get_scroll_wheel() {
-            if app.screen == Screen::Playing && dy.abs() > 0.01 {
-                history_scroll -= dy.signum() as i32;
-                history_scroll = history_scroll.max(0);
+            if dy.abs() > 0.01 {
+                match app.screen {
+                    Screen::Playing => {
+                        history_scroll -= dy.signum() as i32;
+                        history_scroll = history_scroll.max(0);
+                    }
+                    Screen::LoadGame => {
+                        load_scroll -= dy.signum() as i32;
+                        load_scroll = load_scroll.max(0);
+                    }
+                    _ => {}
+                }
             }
         }
 
@@ -945,13 +1082,11 @@ fn main() {
                             }
                         }
                         if !handled
-                            && save::exists()
-                            && menu_resume_button(show_coords).contains(lx, ly)
+                            && save::any_exist()
+                            && menu_load_button(show_coords).contains(lx, ly)
                         {
-                            if let Some((mode, moves)) = save::load() {
-                                app.resume_game(mode, moves);
-                                history_scroll = 0;
-                            }
+                            app.open_load_screen();
+                            load_scroll = 0;
                         }
                     }
                     Screen::Playing => {
@@ -998,6 +1133,26 @@ fn main() {
                         }
                     }
                     Screen::GameOver => app.back_to_menu(),
+                    Screen::LoadGame => {
+                        if load_back_button_rect(show_coords).contains(lx, ly) {
+                            app.close_load_screen();
+                        } else {
+                            let visible = load_visible_rows(show_coords);
+                            let max_scroll = (app.load_entries.len() as i32 - visible).max(0);
+                            let scroll = load_scroll.clamp(0, max_scroll);
+                            for row in 0..visible {
+                                let idx = (scroll + row) as usize;
+                                if idx >= app.load_entries.len() {
+                                    break;
+                                }
+                                if load_row_rect(row, show_coords).contains(lx, ly) {
+                                    app.load_selected(idx);
+                                    history_scroll = 0;
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1016,6 +1171,7 @@ fn main() {
                     }
                 }
                 Screen::GameOver => app.back_to_menu(),
+                Screen::LoadGame => app.close_load_screen(),
             }
         }
         if window.is_key_pressed(Key::U, KeyRepeat::No) && app.screen == Screen::Playing {
@@ -1040,11 +1196,9 @@ fn main() {
                     history_scroll = 0;
                 }
             }
-            if window.is_key_pressed(Key::Key4, KeyRepeat::No) && save::exists() {
-                if let Some((mode, moves)) = save::load() {
-                    app.resume_game(mode, moves);
-                    history_scroll = 0;
-                }
+            if window.is_key_pressed(Key::Key4, KeyRepeat::No) && save::any_exist() {
+                app.open_load_screen();
+                load_scroll = 0;
             }
         }
 
@@ -1057,6 +1211,7 @@ fn main() {
             Screen::Menu => draw_menu(&mut canvas, show_coords, app.level),
             Screen::Playing => draw_board(&mut canvas, &app, history_scroll, logical_mouse),
             Screen::GameOver => draw_game_over(&mut canvas, &app, history_scroll),
+            Screen::LoadGame => draw_load_screen(&mut canvas, &app, load_scroll),
         }
 
         let out_len = (win_w.max(1) * win_h.max(1)) as usize;
