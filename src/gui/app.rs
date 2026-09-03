@@ -165,6 +165,7 @@ impl App {
 
     pub fn start_game(&mut self, mode: Mode) {
         self.mode = mode;
+        self.flipped = mode == Mode::VsAiBlack;
         self.game = Game::new();
         self.selected = None;
         self.legal.clear();
