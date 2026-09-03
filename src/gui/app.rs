@@ -21,6 +21,15 @@ pub enum Screen {
     LoadGame,
 }
 
+/// Which content the sidebar's lower half shows during a game: the move
+/// list, or the inline per-piece movement reference (see
+/// `App::hovered_piece_help`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SidebarTab {
+    Moves,
+    Help,
+}
+
 pub struct PendingChoice {
     pub options: Vec<Move>,
 }
@@ -55,6 +64,17 @@ pub struct App {
     /// AI strength, `MIN_LEVEL`..=`MAX_LEVEL`. Chosen from the menu before
     /// starting a game; see `keres_engine::engine::SearchConfig::for_level`.
     pub level: u8,
+    /// Whether the first-launch mini help modal has already been shown, so
+    /// it only ever appears once per app run.
+    help_seen: bool,
+    /// True while the first-launch mini help modal is on screen (see
+    /// `start_game`/`dismiss_help`).
+    pub show_help: bool,
+    /// True while the fullscreen rules reference is on screen — openable
+    /// from both the main menu and an in-progress game.
+    pub show_rules: bool,
+    /// Which content the sidebar's lower half shows (see `SidebarTab`).
+    pub sidebar_tab: SidebarTab,
     /// Applied moves with whether each was a capture, for the history panel.
     pub history: Vec<(Move, bool)>,
     undo_stack: Vec<(Move, keres_engine::UndoInfo)>,
@@ -88,6 +108,10 @@ impl App {
             // behavior exactly (see `SearchConfig::for_level`), so anyone
             // who never touches the difficulty slider sees no change.
             level: 9,
+            help_seen: false,
+            show_help: false,
+            show_rules: false,
+            sidebar_tab: SidebarTab::Help,
             history: Vec::new(),
             undo_stack: Vec::new(),
             save_path: None,
@@ -111,7 +135,17 @@ impl App {
         self.undo_stack.clear();
         self.screen = Screen::Playing;
         self.save_path = Some(crate::save::new_path(mode));
+        self.note_game_launched();
         self.maybe_start_ai();
+    }
+
+    /// Show the first-launch mini help modal exactly once, ever (see
+    /// `show_help`/`help_seen`).
+    fn note_game_launched(&mut self) {
+        if !self.help_seen {
+            self.help_seen = true;
+            self.show_help = true;
+        }
     }
 
     /// Open the LOAD GAME screen, listing every game found in the save
@@ -162,6 +196,7 @@ impl App {
         self.history.clear();
         self.undo_stack.clear();
         self.screen = Screen::Playing;
+        self.note_game_launched();
         for mv in moves {
             let is_capture = self
                 .game
@@ -369,6 +404,43 @@ impl App {
         );
     }
 
+    /// Dismiss the first-launch mini help modal (see `show_help`).
+    pub fn dismiss_help(&mut self) {
+        self.show_help = false;
+    }
+
+    /// Open the fullscreen rules reference — from the main menu or, via the
+    /// sidebar, from an in-progress game.
+    pub fn open_rules(&mut self) {
+        self.show_rules = true;
+    }
+
+    pub fn close_rules(&mut self) {
+        self.show_rules = false;
+    }
+
+    pub fn set_sidebar_tab(&mut self, tab: SidebarTab) {
+        self.sidebar_tab = tab;
+    }
+
+    /// The rules of the currently-hovered square's piece (bottom, then top
+    /// if stacked) — for the sidebar's HELP tab. `None` when nothing
+    /// relevant is hovered.
+    pub fn hovered_piece_help(
+        &self,
+    ) -> Option<(
+        &'static crate::rules::PieceRule,
+        Option<&'static crate::rules::PieceRule>,
+    )> {
+        let pos = self.hovered?;
+        let piece = self.game.board.get_piece(&pos)?;
+        let bottom = crate::rules::find(crate::render::letter_for(piece.bottom));
+        let top = piece
+            .top
+            .map(|t| crate::rules::find(crate::render::letter_for(t)));
+        Some((bottom, top))
+    }
+
     pub fn can_undo(&self) -> bool {
         !self.ai_thinking && self.pending.is_none() && !self.undo_stack.is_empty()
     }
@@ -529,6 +601,10 @@ impl App {
         self.ai_thinking = false;
         self.ai_thinking_since = None;
         self.confirm_menu = false;
+        // Scoped to "a game just started" — don't let it linger into the
+        // menu (normal click-routing already can't reach this button while
+        // the modal is up, but this is a cheap belt-and-suspenders guard).
+        self.show_help = false;
     }
 
     /// Open the "return to main menu?" prompt (ESC or the MAIN MENU button)

@@ -3,6 +3,7 @@ mod base;
 mod font;
 mod icons;
 mod render;
+mod rules;
 mod save;
 mod symbols;
 
@@ -38,6 +39,7 @@ enum SidebarAction {
     ToggleCoords,
     Undo,
     Resign,
+    Rules,
 }
 
 fn menu_mode_buttons(show_coords: bool) -> [(Rect, &'static str, Mode); 3] {
@@ -99,6 +101,21 @@ fn menu_level_boxes(show_coords: bool) -> [Rect; 10] {
             y1: top + bh,
         }
     })
+}
+
+/// "RULES" button, top-right corner of the main menu — also present in the
+/// sidebar (see `sidebar_buttons`) while a game is in progress.
+fn menu_rules_button_rect(show_coords: bool) -> Rect {
+    let bw = 90;
+    let bh = render::BTN_H;
+    let pad = 14;
+    let lw = render::logical_w(show_coords);
+    Rect {
+        x0: lw - pad - bw,
+        y0: pad,
+        x1: lw - pad,
+        y1: pad + bh,
+    }
 }
 
 fn menu_load_button(show_coords: bool) -> Rect {
@@ -258,7 +275,7 @@ fn sidebar_button_rect(index: i32, show_coords: bool) -> Rect {
     }
 }
 
-fn sidebar_buttons(app: &App) -> [(Rect, String, SidebarAction, bool); 6] {
+fn sidebar_buttons(app: &App) -> [(Rect, String, SidebarAction, bool); 7] {
     [
         (
             sidebar_button_rect(0, app.show_coords),
@@ -304,10 +321,16 @@ fn sidebar_buttons(app: &App) -> [(Rect, String, SidebarAction, bool); 6] {
             SidebarAction::Resign,
             true,
         ),
+        (
+            sidebar_button_rect(6, app.show_coords),
+            "RULES".to_string(),
+            SidebarAction::Rules,
+            true,
+        ),
     ]
 }
 
-const HISTORY_TOP: i32 = 300;
+const HISTORY_TOP: i32 = 334;
 const HISTORY_ROW_H: i32 = 13;
 
 fn history_visible_rows(show_coords: bool) -> i32 {
@@ -419,6 +442,17 @@ fn draw_menu(c: &mut Canvas, show_coords: bool, level: u8, mouse: Option<(i32, i
             hovered(&rect),
         );
     }
+    let rules = menu_rules_button_rect(show_coords);
+    render::draw_button(
+        c,
+        rules.x0,
+        rules.y0,
+        rules.x1,
+        rules.y1,
+        "RULES",
+        true,
+        hovered(&rules),
+    );
     c.draw_text_centered(lw / 2, lh - 30, "ESC TO QUIT", 1, render::COL_COORD);
 }
 
@@ -507,13 +541,18 @@ fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i
         );
     }
 
-    c.draw_text(
-        x0 + SIDEBAR_PAD,
-        HISTORY_TOP - 16,
-        "MOVE HISTORY",
-        1,
-        render::COL_COORD,
-    );
+    for (rect, label, tab) in sidebar_tab_rects(app) {
+        let active = app.sidebar_tab == tab;
+        let color = if active {
+            render::COL_SELECT
+        } else {
+            render::COL_COORD
+        };
+        c.draw_text(rect.x0, rect.y0, label, 1, color);
+        if active {
+            c.fill_rect(rect.x0, rect.y1 - 1, rect.x1, rect.y1, render::COL_SELECT);
+        }
+    }
     c.stroke_rect(
         x0 + SIDEBAR_PAD,
         HISTORY_TOP - 4,
@@ -523,32 +562,154 @@ fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i
         render::COL_COORD,
     );
 
-    let pairs: Vec<_> = app
-        .history
-        .chunks(2)
-        .enumerate()
-        .map(|(i, chunk)| (i + 1, chunk.first(), chunk.get(1)))
-        .collect();
-    let visible = history_visible_rows(app.show_coords);
-    let max_scroll = (pairs.len() as i32 - visible).max(0);
-    let scroll = history_scroll.clamp(0, max_scroll);
-    for (row, (n, white, black)) in pairs
-        .iter()
-        .skip(scroll as usize)
-        .take(visible as usize)
-        .enumerate()
-    {
-        let y = HISTORY_TOP + row as i32 * HISTORY_ROW_H;
-        let mut line = format!("{}.", n);
-        if let Some((mv, cap)) = white {
-            line.push(' ');
-            line.push_str(&move_notation(mv, *cap));
+    match app.sidebar_tab {
+        app::SidebarTab::Moves => {
+            let pairs: Vec<_> = app
+                .history
+                .chunks(2)
+                .enumerate()
+                .map(|(i, chunk)| (i + 1, chunk.first(), chunk.get(1)))
+                .collect();
+            let visible = history_visible_rows(app.show_coords);
+            let max_scroll = (pairs.len() as i32 - visible).max(0);
+            let scroll = history_scroll.clamp(0, max_scroll);
+            for (row, (n, white, black)) in pairs
+                .iter()
+                .skip(scroll as usize)
+                .take(visible as usize)
+                .enumerate()
+            {
+                let y = HISTORY_TOP + row as i32 * HISTORY_ROW_H;
+                let mut line = format!("{}.", n);
+                if let Some((mv, cap)) = white {
+                    line.push(' ');
+                    line.push_str(&move_notation(mv, *cap));
+                }
+                if let Some((mv, cap)) = black {
+                    line.push(' ');
+                    line.push_str(&move_notation(mv, *cap));
+                }
+                c.draw_text(x0 + SIDEBAR_PAD, y, &line, 1, render::COL_COORD);
+            }
         }
-        if let Some((mv, cap)) = black {
-            line.push(' ');
-            line.push_str(&move_notation(mv, *cap));
+        app::SidebarTab::Help => draw_sidebar_help(c, app, x0, lw),
+    }
+}
+
+/// Tab rects for the sidebar's HELP/MOVES switcher, at `HISTORY_TOP - 18`.
+/// HELP comes first — it's the default tab (see `App::new`).
+fn sidebar_tab_rects(app: &App) -> [(Rect, &'static str, app::SidebarTab); 2] {
+    let x0 = render::board_w(app.show_coords) + SIDEBAR_PAD;
+    let y0 = HISTORY_TOP - 18;
+    let y1 = HISTORY_TOP - 6;
+    [
+        (
+            Rect {
+                x0,
+                y0,
+                x1: x0 + 45,
+                y1,
+            },
+            "HELP",
+            app::SidebarTab::Help,
+        ),
+        (
+            Rect {
+                x0: x0 + 55,
+                y0,
+                x1: x0 + 55 + 54,
+                y1,
+            },
+            "MOVES",
+            app::SidebarTab::Moves,
+        ),
+    ]
+}
+
+/// The sidebar's HELP tab: the hovered square's piece movement/promotion
+/// (both halves of a stack, see `App::hovered_piece_help`), or a prompt when
+/// nothing relevant is hovered.
+fn draw_sidebar_help(c: &mut Canvas, app: &App, x0: i32, lw: i32) {
+    let text_x0 = x0 + SIDEBAR_PAD + icons::ICON_N as i32 + 8;
+    let text_w = lw - text_x0 - SIDEBAR_PAD;
+    let wrap = |c: &mut Canvas, y: i32, text: &str, color: u32| -> i32 {
+        // Simple word-wrap: greedily pack words into lines no wider than
+        // the sidebar's content area, since the bitmap font has no natural
+        // line-breaking of its own. Indented to line up under the name,
+        // past the icon column (see the `draw_icon` call below).
+        let max_chars = (text_w / (font::FONT_W as i32 + 1)).max(1) as usize;
+        let mut y = y;
+        let mut line = String::new();
+        for word in text.split(' ') {
+            let candidate = if line.is_empty() {
+                word.to_string()
+            } else {
+                format!("{} {}", line, word)
+            };
+            if candidate.len() > max_chars && !line.is_empty() {
+                c.draw_text(text_x0, y, &line, 1, color);
+                y += 14;
+                line = word.to_string();
+            } else {
+                line = candidate;
+            }
         }
-        c.draw_text(x0 + SIDEBAR_PAD, y, &line, 1, render::COL_COORD);
+        if !line.is_empty() {
+            c.draw_text(text_x0, y, &line, 1, color);
+            y += 14;
+        }
+        y
+    };
+
+    let Some((bottom, top)) = app.hovered_piece_help() else {
+        c.draw_text(
+            x0 + SIDEBAR_PAD,
+            HISTORY_TOP,
+            "HOVER A PIECE TO SEE",
+            1,
+            render::COL_COORD,
+        );
+        c.draw_text(
+            x0 + SIDEBAR_PAD,
+            HISTORY_TOP + 14,
+            "ITS MOVES",
+            1,
+            render::COL_COORD,
+        );
+        return;
+    };
+
+    let mut y = HISTORY_TOP;
+    for piece in [Some(bottom), top].into_iter().flatten() {
+        c.draw_icon(
+            x0 + SIDEBAR_PAD,
+            y,
+            piece.icon,
+            1,
+            render::COL_STATUS,
+            false,
+        );
+        c.draw_text(
+            text_x0,
+            y,
+            &format!("{}  {}", piece.letter, piece.name),
+            1,
+            render::COL_STATUS,
+        );
+        let mut ty = wrap(c, y + 14, piece.movement, render::COL_COORD);
+        if let Some(promotion) = piece.promotion {
+            ty = wrap(c, ty, promotion, render::COL_SELECT);
+        }
+        y = ty.max(y + icons::ICON_N as i32) + 10;
+    }
+    if top.is_some() {
+        c.draw_text(
+            x0 + SIDEBAR_PAD,
+            y,
+            "A STACK MOVES AS EITHER PIECE.",
+            1,
+            render::COL_COORD,
+        );
     }
 }
 
@@ -779,6 +940,124 @@ fn draw_game_over(c: &mut Canvas, app: &App, history_scroll: i32) {
     );
 }
 
+/// "CLOSE" button, top-right corner of the fullscreen rules modal (same spot
+/// the menu's own RULES button sits, since the two screens never show at
+/// once).
+fn rules_close_button_rect(show_coords: bool) -> Rect {
+    menu_rules_button_rect(show_coords)
+}
+
+const RULES_GRID_TOP: i32 = 136;
+const RULES_CARD_H: i32 = 46;
+const RULES_CARD_GAP: i32 = 6;
+const RULES_PAD: i32 = 14;
+
+/// One rules-modal piece card's rect, laid out 2 columns x 4 rows over
+/// `rules::PIECES`.
+fn rules_card_rect(index: usize, show_coords: bool) -> Rect {
+    let lw = render::logical_w(show_coords);
+    let col = (index % 2) as i32;
+    let row = (index / 2) as i32;
+    let card_gap_x = 12;
+    let card_w = (lw - 2 * RULES_PAD - card_gap_x) / 2;
+    let x0 = RULES_PAD + col * (card_w + card_gap_x);
+    let y0 = RULES_GRID_TOP + row * (RULES_CARD_H + RULES_CARD_GAP);
+    Rect {
+        x0,
+        y0,
+        x1: x0 + card_w,
+        y1: y0 + RULES_CARD_H,
+    }
+}
+
+/// Fullscreen rules reference — general rules plus every piece's movement
+/// and promotion, laid out to fit on one screen with no scrolling (see
+/// `rules::GENERAL`/`rules::PIECES`). Drawn as an overlay on top of whatever
+/// screen is behind it (menu or an in-progress game).
+fn draw_rules_modal(c: &mut Canvas, show_coords: bool, mouse: Option<(i32, i32)>) {
+    let lw = render::logical_w(show_coords);
+    let lh = render::logical_h(show_coords);
+    c.fill_rect(0, 0, lw, lh, render::COL_PAGE_BG);
+    c.draw_text_centered(lw / 2, 16, "RULES", 3, render::COL_STATUS);
+
+    for (i, line) in rules::GENERAL.iter().enumerate() {
+        c.draw_text_centered(lw / 2, 54 + i as i32 * 13, line, 1, render::COL_COORD);
+    }
+
+    for (i, piece) in rules::PIECES.iter().enumerate() {
+        let rect = rules_card_rect(i, show_coords);
+        let icon_x = rect.x0 + 8;
+        let icon_y = rect.y0 + 6;
+        c.draw_icon(icon_x, icon_y, piece.icon, 1, render::COL_STATUS, false);
+        let text_x = icon_x + icons::ICON_N as i32 + 8;
+        c.draw_text(
+            text_x,
+            rect.y0 + 2,
+            &format!("{}  {}", piece.letter, piece.name),
+            1,
+            render::COL_STATUS,
+        );
+        c.draw_text(text_x, rect.y0 + 14, piece.movement, 1, render::COL_COORD);
+        if let Some(promotion) = piece.promotion {
+            c.draw_text(text_x, rect.y0 + 26, promotion, 1, render::COL_SELECT);
+        }
+    }
+
+    let close = rules_close_button_rect(show_coords);
+    let hovered = mouse
+        .map(|(mx, my)| close.contains(mx, my))
+        .unwrap_or(false);
+    render::draw_button(
+        c, close.x0, close.y0, close.x1, close.y1, "CLOSE", true, hovered,
+    );
+    c.draw_text_centered(lw / 2, lh - 20, "ESC TO CLOSE", 1, render::COL_COORD);
+}
+
+/// YES/NO-style button pair for the first-launch mini help modal — "GOT IT"
+/// dismisses it, "FULL RULES" dismisses it and opens the fullscreen
+/// reference instead.
+fn help_modal_buttons(show_coords: bool) -> (Rect, Rect) {
+    let bw = 170;
+    let bh = render::BTN_H;
+    let gap = 20;
+    let cx = render::board_w(show_coords) / 2;
+    let cy = render::logical_h(show_coords) / 2 + 40;
+    let total_w = 2 * bw + gap;
+    let x0 = cx - total_w / 2;
+    let got_it = Rect {
+        x0,
+        y0: cy,
+        x1: x0 + bw,
+        y1: cy + bh,
+    };
+    let full_rules = Rect {
+        x0: x0 + bw + gap,
+        y0: cy,
+        x1: x0 + bw + gap + bw,
+        y1: cy + bh,
+    };
+    (got_it, full_rules)
+}
+
+/// First-launch mini help modal (see `App::show_help`) — the subset of
+/// rules that doesn't overlap with chess, so a player who already knows
+/// chess can start playing immediately.
+fn draw_help_modal(c: &mut Canvas, show_coords: bool, mouse: Option<(i32, i32)>) {
+    let board_w = render::board_w(show_coords);
+    let lh = render::logical_h(show_coords);
+    c.fill_rect_alpha(0, 0, board_w, lh, 0x000000, 0.82);
+    let cx = board_w / 2;
+    c.draw_text_centered(cx, lh / 2 - 90, "BEFORE YOU BEGIN", 2, render::COL_STATUS);
+    for (i, line) in rules::QUICK_TIPS.iter().enumerate() {
+        c.draw_text_centered(cx, lh / 2 - 44 + i as i32 * 16, line, 1, render::COL_COORD);
+    }
+    let (got_it, full_rules) = help_modal_buttons(show_coords);
+    for (rect, label) in [(&got_it, "GOT IT"), (&full_rules, "FULL RULES")] {
+        let hovered = mouse.map(|(mx, my)| rect.contains(mx, my)).unwrap_or(false);
+        render::draw_button(c, rect.x0, rect.y0, rect.x1, rect.y1, label, true, hovered);
+    }
+}
+
 fn write_ppm(path: &str, buf: &[u32], w: i32, h: i32) {
     use std::io::Write;
     let mut out = std::fs::File::create(path).expect("create snapshot file");
@@ -804,7 +1083,8 @@ fn snapshot_mouse() -> Option<(i32, i32)> {
 /// Headless render-to-file path used only for local visual verification
 /// (`KERES_SNAPSHOT=<path>.ppm KERES_SCREEN=menu|playing|selected|stacked|
 /// gameover|flipped|threats|history|nocoords|hover_friendly|hover_threat|
-/// hover_stack|last_move|confirm_menu|stacked_close_hover|load_game`,
+/// hover_stack|last_move|confirm_menu|stacked_close_hover|load_game|rules|
+/// rules_in_game|quick_help|help_tab|help_tab_stack|help_tab_empty`,
 /// optionally with `KERES_MOUSE=x,y` to check dialog-button hover). Never
 /// touches a window or the real display; save I/O is redirected to a throwaway
 /// temp directory so it never writes into the developer's real save folder.
@@ -815,8 +1095,16 @@ fn run_snapshot(path: &str) {
     let screen = std::env::var("KERES_SCREEN").unwrap_or_else(|_| "menu".to_string());
     match screen.as_str() {
         "menu" => {}
+        "rules" => app.open_rules(),
+        "rules_in_game" => {
+            app.start_game(Mode::Hotseat);
+            app.dismiss_help();
+            app.open_rules();
+        }
+        "quick_help" => app.start_game(Mode::Hotseat),
         "load_game" => {
             app.start_game(Mode::Hotseat);
+            app.dismiss_help();
             app.click_square(Position::new(2, 6));
             app.click_square(Position::new(1, 5));
             app.back_to_menu();
@@ -905,6 +1193,31 @@ fn run_snapshot(path: &str) {
         "hover_friendly" => {
             app.start_game(Mode::Hotseat);
             app.set_hovered(Some(Position::new(3, 6)));
+        }
+        "help_tab" => {
+            app.start_game(Mode::Hotseat);
+            app.dismiss_help();
+            app.set_sidebar_tab(app::SidebarTab::Help);
+            app.set_hovered(Some(Position::new(3, 6)));
+        }
+        "help_tab_stack" => {
+            app.start_game(Mode::Hotseat);
+            app.dismiss_help();
+            app.game.board.set_piece(
+                &Position::new(3, 6),
+                Some(Piece::new(
+                    Color::White,
+                    PieceType::Soldier,
+                    Some(PieceType::Bishop),
+                )),
+            );
+            app.set_sidebar_tab(app::SidebarTab::Help);
+            app.set_hovered(Some(Position::new(3, 6)));
+        }
+        "help_tab_empty" => {
+            app.start_game(Mode::Hotseat);
+            app.dismiss_help();
+            app.set_sidebar_tab(app::SidebarTab::Help);
         }
         "hover_threat" => {
             app.start_game(Mode::Hotseat);
@@ -999,6 +1312,11 @@ fn run_snapshot(path: &str) {
         Screen::GameOver => draw_game_over(&mut canvas, &app, 0),
         Screen::LoadGame => draw_load_screen(&mut canvas, &app, 0, snapshot_mouse()),
     }
+    if app.show_rules {
+        draw_rules_modal(&mut canvas, app.show_coords, snapshot_mouse());
+    } else if app.show_help {
+        draw_help_modal(&mut canvas, app.show_coords, snapshot_mouse());
+    }
     write_ppm(path, &buffer, lw, lh);
 }
 
@@ -1088,92 +1406,120 @@ fn main() {
 
         if clicked {
             if let Some((lx, ly)) = logical_mouse {
-                match app.screen {
-                    Screen::Menu => {
-                        let mut handled = false;
-                        for (i, rect) in menu_level_boxes(show_coords).into_iter().enumerate() {
-                            if rect.contains(lx, ly) {
-                                app.set_level(i as u8 + 1);
-                                handled = true;
-                                break;
-                            }
-                        }
-                        for (rect, _label, mode) in menu_mode_buttons(show_coords) {
-                            if rect.contains(lx, ly) {
-                                app.start_game(mode);
-                                history_scroll = 0;
-                                handled = true;
-                                break;
-                            }
-                        }
-                        if !handled
-                            && save::any_exist()
-                            && menu_load_button(show_coords).contains(lx, ly)
-                        {
-                            app.open_load_screen();
-                            load_scroll = 0;
-                        }
+                if app.show_help {
+                    let (got_it, full_rules) = help_modal_buttons(show_coords);
+                    if got_it.contains(lx, ly) {
+                        app.dismiss_help();
+                    } else if full_rules.contains(lx, ly) {
+                        app.dismiss_help();
+                        app.open_rules();
                     }
-                    Screen::Playing => {
-                        if let Some(pending) = &app.pending {
-                            if close_button_rect(show_coords).contains(lx, ly) {
-                                app.cancel_choice();
-                            } else {
-                                let rects = choice_buttons(pending.options.len(), show_coords);
-                                for (i, rect) in rects.iter().enumerate() {
-                                    if rect.contains(lx, ly) {
-                                        app.resolve_choice(i);
-                                        break;
-                                    }
-                                }
-                            }
-                        } else if app.confirm_menu {
-                            let (yes, no) = confirm_menu_buttons(show_coords);
-                            if yes.contains(lx, ly) {
-                                app.confirm_back_to_menu();
-                            } else if no.contains(lx, ly) {
-                                app.cancel_menu_confirm();
-                            }
-                        } else {
+                } else if app.show_rules {
+                    if rules_close_button_rect(show_coords).contains(lx, ly) {
+                        app.close_rules();
+                    }
+                } else {
+                    match app.screen {
+                        Screen::Menu => {
                             let mut handled = false;
-                            for (rect, _label, action, enabled) in sidebar_buttons(&app) {
-                                if enabled && rect.contains(lx, ly) {
-                                    match action {
-                                        SidebarAction::MainMenu => app.request_menu_confirm(),
-                                        SidebarAction::SwitchSides => app.toggle_flip(),
-                                        SidebarAction::ToggleThreats => app.toggle_threats(),
-                                        SidebarAction::ToggleCoords => app.toggle_coords(),
-                                        SidebarAction::Undo => app.undo(),
-                                        SidebarAction::Resign => app.resign(),
-                                    }
+                            for (i, rect) in menu_level_boxes(show_coords).into_iter().enumerate() {
+                                if rect.contains(lx, ly) {
+                                    app.set_level(i as u8 + 1);
                                     handled = true;
                                     break;
                                 }
                             }
-                            if !handled {
-                                if let Some(pos) = tile_at(lx, ly, app.flipped, show_coords) {
-                                    app.click_square(pos);
+                            for (rect, _label, mode) in menu_mode_buttons(show_coords) {
+                                if rect.contains(lx, ly) {
+                                    app.start_game(mode);
+                                    history_scroll = 0;
+                                    handled = true;
+                                    break;
+                                }
+                            }
+                            if !handled
+                                && save::any_exist()
+                                && menu_load_button(show_coords).contains(lx, ly)
+                            {
+                                app.open_load_screen();
+                                load_scroll = 0;
+                                handled = true;
+                            }
+                            if !handled && menu_rules_button_rect(show_coords).contains(lx, ly) {
+                                app.open_rules();
+                            }
+                        }
+                        Screen::Playing => {
+                            if let Some(pending) = &app.pending {
+                                if close_button_rect(show_coords).contains(lx, ly) {
+                                    app.cancel_choice();
+                                } else {
+                                    let rects = choice_buttons(pending.options.len(), show_coords);
+                                    for (i, rect) in rects.iter().enumerate() {
+                                        if rect.contains(lx, ly) {
+                                            app.resolve_choice(i);
+                                            break;
+                                        }
+                                    }
+                                }
+                            } else if app.confirm_menu {
+                                let (yes, no) = confirm_menu_buttons(show_coords);
+                                if yes.contains(lx, ly) {
+                                    app.confirm_back_to_menu();
+                                } else if no.contains(lx, ly) {
+                                    app.cancel_menu_confirm();
+                                }
+                            } else {
+                                let mut handled = false;
+                                for (rect, _label, action, enabled) in sidebar_buttons(&app) {
+                                    if enabled && rect.contains(lx, ly) {
+                                        match action {
+                                            SidebarAction::MainMenu => app.request_menu_confirm(),
+                                            SidebarAction::SwitchSides => app.toggle_flip(),
+                                            SidebarAction::ToggleThreats => app.toggle_threats(),
+                                            SidebarAction::ToggleCoords => app.toggle_coords(),
+                                            SidebarAction::Undo => app.undo(),
+                                            SidebarAction::Resign => app.resign(),
+                                            SidebarAction::Rules => app.open_rules(),
+                                        }
+                                        handled = true;
+                                        break;
+                                    }
+                                }
+                                if !handled {
+                                    for (rect, _label, tab) in sidebar_tab_rects(&app) {
+                                        if rect.contains(lx, ly) {
+                                            app.set_sidebar_tab(tab);
+                                            handled = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if !handled {
+                                    if let Some(pos) = tile_at(lx, ly, app.flipped, show_coords) {
+                                        app.click_square(pos);
+                                    }
                                 }
                             }
                         }
-                    }
-                    Screen::GameOver => app.back_to_menu(),
-                    Screen::LoadGame => {
-                        if load_back_button_rect(show_coords).contains(lx, ly) {
-                            app.close_load_screen();
-                        } else {
-                            let visible = load_visible_rows(show_coords);
-                            let max_scroll = (app.load_entries.len() as i32 - visible).max(0);
-                            let scroll = load_scroll.clamp(0, max_scroll);
-                            for row in 0..visible {
-                                let idx = (scroll + row) as usize;
-                                if idx >= app.load_entries.len() {
-                                    break;
-                                }
-                                if load_row_rect(row, show_coords).contains(lx, ly) {
-                                    app.load_selected(idx);
-                                    history_scroll = 0;
-                                    break;
+                        Screen::GameOver => app.back_to_menu(),
+                        Screen::LoadGame => {
+                            if load_back_button_rect(show_coords).contains(lx, ly) {
+                                app.close_load_screen();
+                            } else {
+                                let visible = load_visible_rows(show_coords);
+                                let max_scroll = (app.load_entries.len() as i32 - visible).max(0);
+                                let scroll = load_scroll.clamp(0, max_scroll);
+                                for row in 0..visible {
+                                    let idx = (scroll + row) as usize;
+                                    if idx >= app.load_entries.len() {
+                                        break;
+                                    }
+                                    if load_row_rect(row, show_coords).contains(lx, ly) {
+                                        app.load_selected(idx);
+                                        history_scroll = 0;
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -1183,20 +1529,26 @@ fn main() {
         }
 
         if window.is_key_pressed(Key::Escape, KeyRepeat::No) {
-            match app.screen {
-                // The only place ESC quits the app outright.
-                Screen::Menu => should_quit = true,
-                Screen::Playing => {
-                    if app.pending.is_some() {
-                        app.cancel_choice();
-                    } else if app.confirm_menu {
-                        app.cancel_menu_confirm();
-                    } else {
-                        app.request_menu_confirm();
+            if app.show_help {
+                app.dismiss_help();
+            } else if app.show_rules {
+                app.close_rules();
+            } else {
+                match app.screen {
+                    // The only place ESC quits the app outright.
+                    Screen::Menu => should_quit = true,
+                    Screen::Playing => {
+                        if app.pending.is_some() {
+                            app.cancel_choice();
+                        } else if app.confirm_menu {
+                            app.cancel_menu_confirm();
+                        } else {
+                            app.request_menu_confirm();
+                        }
                     }
+                    Screen::GameOver => app.back_to_menu(),
+                    Screen::LoadGame => app.close_load_screen(),
                 }
-                Screen::GameOver => app.back_to_menu(),
-                Screen::LoadGame => app.close_load_screen(),
             }
         }
         if window.is_key_pressed(Key::U, KeyRepeat::No) && app.screen == Screen::Playing {
@@ -1237,6 +1589,11 @@ fn main() {
             Screen::Playing => draw_board(&mut canvas, &app, history_scroll, logical_mouse),
             Screen::GameOver => draw_game_over(&mut canvas, &app, history_scroll),
             Screen::LoadGame => draw_load_screen(&mut canvas, &app, load_scroll, logical_mouse),
+        }
+        if app.show_rules {
+            draw_rules_modal(&mut canvas, show_coords, logical_mouse);
+        } else if app.show_help {
+            draw_help_modal(&mut canvas, show_coords, logical_mouse);
         }
 
         let out_len = (win_w.max(1) * win_h.max(1)) as usize;
