@@ -124,6 +124,15 @@ pub struct App {
     save_path: Option<std::path::PathBuf>,
     /// Populated by `open_load_screen`, rendered by the LOAD GAME screen.
     pub load_entries: Vec<crate::save::SaveEntry>,
+    /// True when a move just landed and it's the AI's turn next, but the
+    /// slide animation for that move hasn't finished yet — see
+    /// `apply_move`/`tick_anim`. The AI search is a multi-threaded,
+    /// CPU-saturating Rayon job; starting it immediately competes with the
+    /// render thread for CPU and is what makes the ~150ms slide stutter.
+    /// Delaying the search until the animation completes keeps that one
+    /// frame smooth at the cost of a barely-perceptible delay before
+    /// "AI IS THINKING" appears.
+    ai_start_pending: bool,
 }
 
 impl App {
@@ -156,6 +165,7 @@ impl App {
             undo_stack: Vec::new(),
             save_path: None,
             load_entries: Vec::new(),
+            ai_start_pending: false,
         }
     }
 
@@ -182,6 +192,7 @@ impl App {
         self.ai_thinking_since = None;
         self.last_move = None;
         self.anim = None;
+        self.ai_start_pending = false;
         self.confirm_menu = false;
         self.history.clear();
         self.undo_stack.clear();
@@ -247,6 +258,7 @@ impl App {
         self.ai_thinking_since = None;
         self.last_move = None;
         self.anim = None;
+        self.ai_start_pending = false;
         self.confirm_menu = false;
         self.history.clear();
         self.undo_stack.clear();
@@ -358,6 +370,10 @@ impl App {
         if let Some(anim) = &self.anim {
             if anim.progress().is_none() {
                 self.anim = None;
+                if self.ai_start_pending {
+                    self.ai_start_pending = false;
+                    self.maybe_start_ai();
+                }
             }
         }
     }
@@ -401,6 +417,11 @@ impl App {
         }
         if self.game.is_game_over() {
             self.screen = Screen::GameOver;
+        } else if self.anim.is_some() && self.is_ai_turn() {
+            // Don't spawn the (CPU-saturating, multi-threaded) AI search
+            // until the slide animation for this move has finished playing
+            // — see `ai_start_pending`'s doc comment.
+            self.ai_start_pending = true;
         } else {
             self.maybe_start_ai();
         }
@@ -410,6 +431,7 @@ impl App {
     /// engine's reply first so control always returns to the human.
     pub fn undo(&mut self) {
         if self.ai_thinking
+            || self.ai_start_pending
             || self.pending.is_some()
             || self.confirm_menu
             || self.undo_stack.is_empty()
@@ -425,6 +447,7 @@ impl App {
         }
         self.last_move = self.undo_stack.last().map(|(mv, _)| *mv);
         self.anim = None;
+        self.ai_start_pending = false;
         self.selected = None;
         self.legal.clear();
         self.pending = None;
@@ -450,6 +473,7 @@ impl App {
         self.screen = Screen::GameOver;
         self.ai_rx = None;
         self.ai_thinking = false;
+        self.ai_start_pending = false;
         if let Some(path) = &self.save_path {
             let status = if resigning == Color::White {
                 crate::save::Status::WhiteResigned
@@ -545,7 +569,10 @@ impl App {
     }
 
     pub fn can_undo(&self) -> bool {
-        !self.ai_thinking && self.pending.is_none() && !self.undo_stack.is_empty()
+        !self.ai_thinking
+            && !self.ai_start_pending
+            && self.pending.is_none()
+            && !self.undo_stack.is_empty()
     }
 
     /// Update the board square currently under the mouse. Tracked live every
@@ -622,7 +649,8 @@ impl App {
 
     /// Handle a click on board square `pos` while in the Playing screen.
     pub fn click_square(&mut self, pos: Position) {
-        if self.ai_thinking || self.pending.is_some() || self.confirm_menu {
+        if self.ai_thinking || self.ai_start_pending || self.pending.is_some() || self.confirm_menu
+        {
             return;
         }
         if let Some(sel) = self.selected {
@@ -703,6 +731,7 @@ impl App {
         self.ai_rx = None;
         self.ai_thinking = false;
         self.ai_thinking_since = None;
+        self.ai_start_pending = false;
         self.confirm_menu = false;
         // Scoped to "a game just started" — don't let it linger into the
         // menu (normal click-routing already can't reach this button while
@@ -868,7 +897,8 @@ mod tests {
         let mut app = App::new();
         app.start_game(Mode::VsAiBlack); // AI plays White and moves first
         let deadline = Instant::now() + Duration::from_secs(10);
-        while app.ai_thinking && Instant::now() < deadline {
+        while (app.ai_thinking || app.anim.is_some()) && Instant::now() < deadline {
+            app.tick_anim();
             app.poll_ai();
             std::thread::sleep(Duration::from_millis(20));
         }
@@ -884,7 +914,8 @@ mod tests {
         // The human's reply immediately triggers the AI's next search;
         // real UI disables Undo while ai_thinking, so wait it out too.
         let deadline2 = Instant::now() + Duration::from_secs(10);
-        while app.ai_thinking && Instant::now() < deadline2 {
+        while (app.ai_thinking || app.anim.is_some()) && Instant::now() < deadline2 {
+            app.tick_anim();
             app.poll_ai();
             std::thread::sleep(Duration::from_millis(20));
         }
