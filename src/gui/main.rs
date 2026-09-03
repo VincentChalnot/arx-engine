@@ -328,7 +328,7 @@ fn choice_buttons(n: usize, show_coords: bool) -> Vec<Rect> {
 
 const SIDEBAR_PAD: i32 = 14;
 const BTN_GAP: i32 = 6;
-const SIDEBAR_BUTTONS_TOP: i32 = 78;
+const SIDEBAR_BUTTONS_TOP: i32 = 120;
 
 fn sidebar_button_rect(index: i32, show_coords: bool) -> Rect {
     let x0 = render::board_w(show_coords) + SIDEBAR_PAD;
@@ -661,10 +661,10 @@ fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i
     // Same crest+wordmark art as the splash screen/main menu (see
     // `draw_wordmark`), shrunk to fit the sidebar — tune `SIDEBAR_TITLE_SCALE`
     // here to resize it.
-    const SIDEBAR_TITLE_SCALE: f32 = 0.4;
+    const SIDEBAR_TITLE_SCALE: f32 = 1.0;
     c.draw_wide_bitmap_scaled(
         x0 + SIDEBAR_PAD,
-        6,
+        20,
         &splash::TITLE,
         splash::TITLE_W as i32,
         SIDEBAR_TITLE_SCALE,
@@ -681,7 +681,7 @@ fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i
             keres_engine::Color::Black => "BLACK TO MOVE".to_string(),
         }
     };
-    c.draw_text(x0 + SIDEBAR_PAD, 44, &status, 1, render::COL_STATUS);
+    c.draw_text(x0 + SIDEBAR_PAD, 80, &status, 1, render::COL_STATUS);
 
     for (rect, label, _, enabled) in sidebar_buttons(app) {
         let hovered = enabled && mouse.map(|(mx, my)| rect.contains(mx, my)).unwrap_or(false);
