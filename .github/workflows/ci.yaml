@@ -45,6 +45,33 @@ jobs:
         run: cargo clippy --workspace --all-targets --features gui -- -D warnings
         continue-on-error: true
 
+  gui:
+    # The GUI is the only cross-platform artifact (the release workflow ships
+    # it for all three), and it is the only place with per-OS code — minifb's
+    # window-icon API differs per platform, see src/gui/platform_icon.rs. Tags
+    # are too late to find out it does not compile, so build it on every PR.
+    name: Build GUI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: gui-${{ matrix.os }}
+
+      - name: Build GUI
+        run: cargo build --profile gui --bin gui --features gui
+
   build:
     name: Build backend image
     runs-on: ubuntu-latest
