@@ -58,8 +58,9 @@ pub enum Screen {
 /// `App::hovered_piece_help`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SidebarTab {
-    Moves,
     Help,
+    Moves,
+    Settings,
 }
 
 pub struct PendingChoice {
@@ -96,6 +97,9 @@ pub struct App {
     pub flipped: bool,
     pub show_threats: bool,
     pub show_coords: bool,
+    /// Whether the far side's piece icons render upside down — see
+    /// `main.rs::is_upside_down`, toggled from the sidebar's SETTINGS tab.
+    pub rotate_opponent_icons: bool,
     /// AI strength, `MIN_LEVEL`..=`MAX_LEVEL`. Chosen from the menu before
     /// starting a game; see `keres_engine::engine::SearchConfig::for_level`.
     pub level: u8,
@@ -142,6 +146,7 @@ impl App {
             flipped: false,
             show_threats: settings.show_threats,
             show_coords: settings.show_coords,
+            rotate_opponent_icons: settings.rotate_opponent_icons,
             level: settings.level,
             help_seen: settings.help_seen,
             show_help: false,
@@ -160,6 +165,7 @@ impl App {
             show_coords: self.show_coords,
             show_threats: self.show_threats,
             help_seen: self.help_seen,
+            rotate_opponent_icons: self.rotate_opponent_icons,
         });
     }
 
@@ -466,6 +472,11 @@ impl App {
 
     pub fn toggle_coords(&mut self) {
         self.show_coords = !self.show_coords;
+        self.persist_settings();
+    }
+
+    pub fn toggle_rotate_opponent_icons(&mut self) {
+        self.rotate_opponent_icons = !self.rotate_opponent_icons;
         self.persist_settings();
     }
 

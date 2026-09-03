@@ -35,11 +35,59 @@ impl Rect {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingsAction {
+    ToggleThreats,
+    ToggleCoords,
+    ToggleRotateIcons,
+}
+
+/// Full-width toggle buttons for the sidebar's SETTINGS tab (see
+/// `sidebar_tab_rects`), laid out the same way as `sidebar_buttons` but
+/// scoped to that tab's content area (`CONTENT_TOP`) instead of the
+/// always-visible button stack above it.
+fn settings_tab_buttons(app: &App) -> [(Rect, String, SettingsAction); 3] {
+    let x0 = render::board_w(app.show_coords) + SIDEBAR_PAD;
+    let x1 = render::logical_w(app.show_coords) - SIDEBAR_PAD;
+    let rect = |i: i32| Rect {
+        x0,
+        y0: CONTENT_TOP + i * (render::BTN_H + BTN_GAP),
+        x1,
+        y1: CONTENT_TOP + i * (render::BTN_H + BTN_GAP) + render::BTN_H,
+    };
+    [
+        (
+            rect(0),
+            if app.show_threats {
+                "HIDE THREATS".to_string()
+            } else {
+                "SHOW THREATS".to_string()
+            },
+            SettingsAction::ToggleThreats,
+        ),
+        (
+            rect(1),
+            if app.show_coords {
+                "HIDE COORDS".to_string()
+            } else {
+                "SHOW COORDS".to_string()
+            },
+            SettingsAction::ToggleCoords,
+        ),
+        (
+            rect(2),
+            if app.rotate_opponent_icons {
+                "UNROTATE OPPONENT ICONS".to_string()
+            } else {
+                "ROTATE OPPONENT ICONS".to_string()
+            },
+            SettingsAction::ToggleRotateIcons,
+        ),
+    ]
+}
+
 enum SidebarAction {
     MainMenu,
     SwitchSides,
-    ToggleThreats,
-    ToggleCoords,
     Undo,
     Resign,
     Rules,
@@ -294,7 +342,7 @@ fn sidebar_button_rect(index: i32, show_coords: bool) -> Rect {
     }
 }
 
-fn sidebar_buttons(app: &App) -> [(Rect, String, SidebarAction, bool); 7] {
+fn sidebar_buttons(app: &App) -> [(Rect, String, SidebarAction, bool); 5] {
     [
         (
             sidebar_button_rect(0, app.show_coords),
@@ -310,38 +358,18 @@ fn sidebar_buttons(app: &App) -> [(Rect, String, SidebarAction, bool); 7] {
         ),
         (
             sidebar_button_rect(2, app.show_coords),
-            if app.show_threats {
-                "HIDE THREATS".to_string()
-            } else {
-                "SHOW THREATS".to_string()
-            },
-            SidebarAction::ToggleThreats,
-            true,
-        ),
-        (
-            sidebar_button_rect(3, app.show_coords),
-            if app.show_coords {
-                "HIDE COORDS".to_string()
-            } else {
-                "SHOW COORDS".to_string()
-            },
-            SidebarAction::ToggleCoords,
-            true,
-        ),
-        (
-            sidebar_button_rect(4, app.show_coords),
             "UNDO".to_string(),
             SidebarAction::Undo,
             app.can_undo(),
         ),
         (
-            sidebar_button_rect(5, app.show_coords),
+            sidebar_button_rect(3, app.show_coords),
             "RESIGN".to_string(),
             SidebarAction::Resign,
             true,
         ),
         (
-            sidebar_button_rect(6, app.show_coords),
+            sidebar_button_rect(4, app.show_coords),
             "RULES".to_string(),
             SidebarAction::Rules,
             true,
@@ -393,7 +421,10 @@ fn tile_at(lx: i32, ly: i32, flipped: bool, show_coords: bool) -> Option<Positio
 /// board where each side's own tokens face them. "Opponent" here means
 /// whichever color is rendered at the top of the screen — which flips with
 /// `app.flipped`, not with whose turn it is.
-fn is_upside_down(color: keres_engine::Color, flipped: bool) -> bool {
+fn is_upside_down(color: keres_engine::Color, flipped: bool, rotate_opponent_icons: bool) -> bool {
+    if !rotate_opponent_icons {
+        return false;
+    }
     let near_side = if flipped {
         keres_engine::Color::Black
     } else {
@@ -711,12 +742,19 @@ fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i
             }
         }
         app::SidebarTab::Help => draw_sidebar_help(c, app, x0, lw),
+        app::SidebarTab::Settings => {
+            for (rect, label, _) in settings_tab_buttons(app) {
+                let hovered = mouse.map(|(mx, my)| rect.contains(mx, my)).unwrap_or(false);
+                render::draw_button(c, rect.x0, rect.y0, rect.x1, rect.y1, &label, true, hovered);
+            }
+        }
     }
 }
 
-/// Tab rects for the sidebar's HELP/MOVES switcher, at `HISTORY_TOP - 18`.
-/// HELP comes first — it's the default tab (see `App::new`).
-fn sidebar_tab_rects(app: &App) -> [(Rect, &'static str, app::SidebarTab); 2] {
+/// Tab rects for the sidebar's HELP/MOVES/SETTINGS switcher, at
+/// `HISTORY_TOP - 18`. HELP comes first — it's the default tab (see
+/// `App::new`).
+fn sidebar_tab_rects(app: &App) -> [(Rect, &'static str, app::SidebarTab); 3] {
     let x0 = render::board_w(app.show_coords) + SIDEBAR_PAD;
     let y0 = HISTORY_TOP - 18;
     let y1 = HISTORY_TOP - 6;
@@ -740,6 +778,16 @@ fn sidebar_tab_rects(app: &App) -> [(Rect, &'static str, app::SidebarTab); 2] {
             },
             "MOVES",
             app::SidebarTab::Moves,
+        ),
+        (
+            Rect {
+                x0: x0 + 55 + 54 + 10,
+                y0,
+                x1: x0 + 55 + 54 + 10 + 78,
+                y1,
+            },
+            "SETTINGS",
+            app::SidebarTab::Settings,
         ),
     ]
 }
@@ -948,7 +996,8 @@ fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i32
             if let Some(piece) = app.game.board.get_piece(&board_p) {
                 let tx = gutter + sx * TILE_W;
                 let ty = topbar + sy * TILE_H;
-                let upside_down = is_upside_down(piece.color, app.flipped);
+                let upside_down =
+                    is_upside_down(piece.color, app.flipped, app.rotate_opponent_icons);
                 render::draw_piece(c, tx, ty, piece as &Piece, upside_down);
             }
         }
@@ -963,7 +1012,7 @@ fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i32
         let (tx, ty) = screen_coord(anim.to, app.flipped);
         let px = gutter as f32 + (fx as f32 + (tx - fx) as f32 * eased) * TILE_W as f32;
         let py = topbar as f32 + (fy as f32 + (ty - fy) as f32 * eased) * TILE_H as f32;
-        let upside_down = is_upside_down(anim.piece.color, app.flipped);
+        let upside_down = is_upside_down(anim.piece.color, app.flipped, app.rotate_opponent_icons);
         render::draw_piece(
             c,
             px.round() as i32,
@@ -1375,6 +1424,11 @@ fn run_snapshot(path: &str) {
             app.set_sidebar_tab(app::SidebarTab::Help);
             app.set_hovered(Some(Position::new(3, 6)));
         }
+        "settings_tab" => {
+            app.start_game(Mode::Hotseat);
+            app.dismiss_help();
+            app.set_sidebar_tab(app::SidebarTab::Settings);
+        }
         "help_tab_stack" => {
             app.start_game(Mode::Hotseat);
             app.dismiss_help();
@@ -1687,8 +1741,6 @@ fn main() {
                                         match action {
                                             SidebarAction::MainMenu => app.request_menu_confirm(),
                                             SidebarAction::SwitchSides => app.toggle_flip(),
-                                            SidebarAction::ToggleThreats => app.toggle_threats(),
-                                            SidebarAction::ToggleCoords => app.toggle_coords(),
                                             SidebarAction::Undo => app.undo(),
                                             SidebarAction::Resign => app.resign(),
                                             SidebarAction::Rules => app.open_rules(),
@@ -1701,6 +1753,23 @@ fn main() {
                                     for (rect, _label, tab) in sidebar_tab_rects(&app) {
                                         if rect.contains(lx, ly) {
                                             app.set_sidebar_tab(tab);
+                                            handled = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if !handled && app.sidebar_tab == app::SidebarTab::Settings {
+                                    for (rect, _label, action) in settings_tab_buttons(&app) {
+                                        if rect.contains(lx, ly) {
+                                            match action {
+                                                SettingsAction::ToggleThreats => {
+                                                    app.toggle_threats()
+                                                }
+                                                SettingsAction::ToggleCoords => app.toggle_coords(),
+                                                SettingsAction::ToggleRotateIcons => {
+                                                    app.toggle_rotate_opponent_icons()
+                                                }
+                                            }
                                             handled = true;
                                             break;
                                         }

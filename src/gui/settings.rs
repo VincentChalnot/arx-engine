@@ -14,6 +14,7 @@ const FORMAT_VERSION: u8 = 1;
 const FLAG_SHOW_COORDS: u8 = 1 << 0;
 const FLAG_SHOW_THREATS: u8 = 1 << 1;
 const FLAG_HELP_SEEN: u8 = 1 << 2;
+const FLAG_ROTATE_ICONS: u8 = 1 << 3;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Settings {
@@ -23,6 +24,11 @@ pub struct Settings {
     /// Whether the first-launch mini rules modal has already been shown —
     /// once true, `App::start_game` never shows it again.
     pub help_seen: bool,
+    /// Whether the far side's piece icons render upside down (see
+    /// `main.rs::is_upside_down`). Off by default — most players find
+    /// upright icons easier to read on a screen than the physical-board
+    /// convention it mimics.
+    pub rotate_opponent_icons: bool,
 }
 
 impl Default for Settings {
@@ -33,6 +39,7 @@ impl Default for Settings {
             show_coords: true,
             show_threats: true,
             help_seen: false,
+            rotate_opponent_icons: false,
         }
     }
 }
@@ -78,6 +85,7 @@ pub fn load() -> Settings {
         show_coords: flags & FLAG_SHOW_COORDS != 0,
         show_threats: flags & FLAG_SHOW_THREATS != 0,
         help_seen: flags & FLAG_HELP_SEEN != 0,
+        rotate_opponent_icons: flags & FLAG_ROTATE_ICONS != 0,
     }
 }
 
@@ -91,6 +99,9 @@ pub fn save(settings: &Settings) {
     }
     if settings.help_seen {
         flags |= FLAG_HELP_SEEN;
+    }
+    if settings.rotate_opponent_icons {
+        flags |= FLAG_ROTATE_ICONS;
     }
     let bytes = [FORMAT_VERSION, settings.level, flags];
     let path = settings_path();
@@ -121,6 +132,7 @@ mod tests {
             show_coords: false,
             show_threats: true,
             help_seen: true,
+            rotate_opponent_icons: true,
         };
         save(&settings);
         assert_eq!(load(), settings);

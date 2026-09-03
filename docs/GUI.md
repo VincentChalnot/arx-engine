@@ -278,7 +278,7 @@ added: `splash`, `menu`, `new_game`, `rules`, `rules_in_game`,
 `flipped`, `threats`, `history`, `nocoords`, `hover_friendly`,
 `hover_threat`, `hover_stack`, `last_move`, `confirm_menu`,
 `stacked_close_hover`, `help_tab`, `help_tab_stack`, `help_tab_empty`,
-`move_anim_start`, `move_anim_mid`. Add
+`settings_tab`, `move_anim_start`, `move_anim_mid`. Add
 `KERES_MOUSE=x,y` (logical-canvas pixel coordinates) to also check a dialog
 button's hover state. It never opens a window or touches the display, so it
 works over SSH/CI; save I/O is also redirected to a throwaway temp directory
