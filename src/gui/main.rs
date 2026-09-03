@@ -1459,6 +1459,10 @@ fn main() {
         return;
     }
 
+    // Live FPS counter, bottom-right of the window — only when explicitly
+    // asked for, so it never shows up for a normal player.
+    let debug = std::env::args().any(|a| a == "--debug");
+
     let mut app = App::new();
 
     let mut window = Window::new(
@@ -1488,10 +1492,22 @@ fn main() {
     // App::request_menu_confirm), so the window close is driven by this flag
     // rather than the raw key state.
     let mut should_quit = false;
+    let mut last_frame = std::time::Instant::now();
+    // Exponential moving average so the number doesn't flicker every frame.
+    let mut fps_ema: f32 = 60.0;
 
     while window.is_open() && !should_quit {
         app.poll_ai();
         app.tick_anim();
+
+        if debug {
+            let now = std::time::Instant::now();
+            let dt = now.duration_since(last_frame).as_secs_f32();
+            last_frame = now;
+            if dt > 0.0 {
+                fps_ema = fps_ema * 0.9 + (1.0 / dt) * 0.1;
+            }
+        }
 
         let show_coords = app.show_coords;
         let lw = render::logical_w(show_coords);
@@ -1748,6 +1764,11 @@ fn main() {
             draw_rules_modal(&mut canvas, show_coords, logical_mouse);
         } else if app.show_help {
             draw_help_modal(&mut canvas, show_coords, logical_mouse);
+        }
+        if debug {
+            let label = format!("{:.0} FPS", fps_ema);
+            let w = Canvas::text_width(&label, 1);
+            canvas.draw_text(lw - 8 - w, lh - 16, &label, 1, render::COL_COORD);
         }
 
         let out_len = (win_w.max(1) * win_h.max(1)) as usize;
