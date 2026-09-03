@@ -21,6 +21,8 @@ See `Cargo.toml` (`[profile.gui]`, the `gui` feature) and the Makefile's
 | `symbols.rs` | **Generated** — UI symbol bitmasks (currently just the stacking-hover arrow). Do not edit by hand |
 | `font.rs` | Generated 8×10 1-bit bitmap font |
 | `save.rs` | Per-game autosave: every move is written to its own file in a dedicated folder (via `dirs_next::data_dir()`), browsable from the menu's LOAD GAME screen |
+| `window_icon.rs` | **Generated** — the window/taskbar icon as an ARGB buffer. Do not edit by hand |
+| `platform_icon.rs` | Hands that buffer to the platform's window-icon API — the one place with per-OS code (and the GUI's only `unsafe`) |
 
 ## Logical canvas and scaling
 
@@ -142,6 +144,35 @@ use, so a row here is `ceil(width / 32)` `u32` words, leftmost word first,
 each word left-aligned on its own first column (bit 31) — a short final
 word pads on its low end, which keeps the decode loop uniform. They are
 drawn with `Canvas::draw_wide_bitmap` rather than `draw_bitmap`.
+
+### Window icon
+
+`assets/pixel/logo.xcf` doubles as the window/taskbar icon:
+`scripts/gen_window_icon.py` centers the 46×37 crest — unscaled, since
+nearest-neighbor downscaling would mangle art drawn pixel by pixel — on a
+64×64 transparent square and writes it to `src/gui/window_icon.rs` as a flat
+`[width, height, argb pixels...]` buffer. "On" pixels are opaque
+`COL_GOLD`, everything else fully transparent, so the icon reads against any
+desktop theme.
+
+Installing it is `platform_icon::set_window_icon`, and it is per-OS because
+minifb's `Icon` is three different things:
+
+| Platform | minifb API | What we do |
+|---|---|---|
+| Linux/X11 | `Icon: TryFrom<&[u64]>` — a `_NET_WM_ICON` ARGB buffer | Pass the generated buffer straight through (its element type and layout are exactly this format) |
+| Windows | `Icon::from_str` only — a path to an `.ico` **file on disk** | Build an `HICON` from the same buffer (32-bit top-down DIB, alpha as the transparency mask) and `WM_SETICON` it onto the window |
+| macOS | none — `set_icon` is `unimplemented!()` and panics | Nothing at runtime; a Mac app icon is the `.icns` in an `.app` bundle, i.e. a packaging step |
+
+The Windows path is the GUI's only `unsafe` block. minifb's own
+`Icon::from_str` is no help there — it needs a file shipped alongside the
+`.exe`, and it returns a pointer into a `Vec` it drops before returning.
+
+Calling the Linux form unconditionally is what used to break the Windows and
+macOS release builds (`TryFrom<&[u64]>` is `#[cfg(target_os = "linux")]` in
+minifb, so those targets failed to compile); the `Build GUI` matrix in
+`.github/workflows/ci.yaml` builds all three so that regression cannot reach
+a release again.
 
 ### Generating `icons.rs` / `base.rs` / `symbols.rs` / `splash.rs`
 

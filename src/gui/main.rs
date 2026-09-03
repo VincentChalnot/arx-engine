@@ -2,12 +2,16 @@ mod app;
 mod base;
 mod font;
 mod icons;
+mod platform_icon;
 mod render;
 mod rules;
 mod save;
 mod settings;
 mod splash;
 mod symbols;
+// Only the platforms whose icon API can consume it (see platform_icon.rs)
+// pull the 32 KB ARGB buffer in.
+#[cfg(any(target_os = "linux", windows))]
 mod window_icon;
 
 use app::{move_choice_label, App, Mode, Screen};
@@ -1574,11 +1578,9 @@ fn main() {
     )
     .expect("unable to open window");
     window.set_target_fps(60);
-    // X11 only (see minifb::Icon) — a no-op TryFrom failure elsewhere is
-    // silently ignored rather than gating window creation on it.
-    if let Ok(icon) = minifb::Icon::try_from(&window_icon::WINDOW_ICON[..]) {
-        window.set_icon(icon);
-    }
+    // minifb's icon API differs per platform (and does not exist on macOS) —
+    // see platform_icon.rs. Best-effort: never gates window creation.
+    platform_icon::set_window_icon(&mut window);
 
     let mut logical: Vec<u32> = Vec::new();
     let mut output: Vec<u32> = Vec::new();

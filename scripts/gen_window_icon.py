@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Regenerate src/gui/window_icon.rs — the taskbar/window-manager icon set
-via minifb's X11 `set_icon` (see `main.rs`), from the splash crest
+"""Regenerate src/gui/window_icon.rs — the taskbar/window-manager icon,
+installed by `src/gui/platform_icon.rs`, from the splash crest
 (assets/pixel/logo.xcf).
 
 Encodes the freedesktop `_NET_WM_ICON` buffer format directly: a flat
 `[width, height, argb pixel...]` u64 array (X11 packs CARDINAL as 64-bit
 slots on 64-bit systems even though the property format is nominally 32-bit
-— see minifb's `os/posix/x11.rs::set_icon`).
+— see minifb's `os/posix/x11.rs::set_icon`). Windows gets no icon API it
+could take a buffer through at all, so it reuses this one: the same
+`0xAARRGGBB` pixels, read out of the low half of each slot, become the
+`HICON` (see `platform_icon.rs`). macOS has no runtime icon API in minifb.
 
 The crest is 46x37, so rather than scale it — nearest-neighbor down to the
 16px the spec's smaller sizes want would mangle art drawn pixel by pixel —
