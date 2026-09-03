@@ -42,9 +42,9 @@ enum SidebarAction {
 
 fn menu_mode_buttons(show_coords: bool) -> [(Rect, &'static str, Mode); 3] {
     let bw = 460;
-    let bh = 52;
+    let bh = render::BTN_H;
     let cx = render::logical_w(show_coords) / 2;
-    let gap = 16;
+    let gap = 10;
     let top = 260;
     [
         (
@@ -103,12 +103,13 @@ fn menu_level_boxes(show_coords: bool) -> [Rect; 10] {
 
 fn menu_load_button(show_coords: bool) -> Rect {
     let bw = 460;
-    let bh = 52;
+    let bh = render::BTN_H;
+    let gap = 10;
     let cx = render::logical_w(show_coords) / 2;
-    // 12px below the 3rd mode button (260 + 3*bh + 2*16 = 448), leaving
-    // enough room above the "ESC TO QUIT" line at the bottom of the screen
-    // (see draw_menu) that the two never overlap.
-    let top = 260 + 3 * bh + 2 * 16 + 12;
+    // 12px below the 3rd mode button, leaving enough room above the
+    // "ESC TO QUIT" line at the bottom of the screen (see draw_menu) that
+    // the two never overlap.
+    let top = 260 + 3 * bh + 2 * gap + 12;
     Rect {
         x0: cx - bw / 2,
         y0: top,
@@ -141,7 +142,7 @@ fn load_visible_rows(show_coords: bool) -> i32 {
 
 fn load_back_button_rect(show_coords: bool) -> Rect {
     let bw = 200;
-    let bh = 44;
+    let bh = render::BTN_H;
     let cx = render::logical_w(show_coords) / 2;
     let lh = render::logical_h(show_coords);
     Rect {
@@ -200,7 +201,7 @@ fn close_button_rect(show_coords: bool) -> Rect {
 /// YES/NO buttons for the "return to main menu?" confirmation prompt.
 fn confirm_menu_buttons(show_coords: bool) -> (Rect, Rect) {
     let bw = 160;
-    let bh = 44;
+    let bh = render::BTN_H;
     let gap = 20;
     let cx = render::board_w(show_coords) / 2;
     let cy = render::logical_h(show_coords) / 2 + 10;
@@ -223,7 +224,7 @@ fn confirm_menu_buttons(show_coords: bool) -> (Rect, Rect) {
 
 fn choice_buttons(n: usize, show_coords: bool) -> Vec<Rect> {
     let bw = 340;
-    let bh = 44;
+    let bh = render::BTN_H;
     let gap = 10;
     let cx = render::board_w(show_coords) / 2;
     let total_h = n as i32 * bh + (n as i32 - 1) * gap;
@@ -242,19 +243,18 @@ fn choice_buttons(n: usize, show_coords: bool) -> Vec<Rect> {
 }
 
 const SIDEBAR_PAD: i32 = 14;
-const BTN_H: i32 = 28;
 const BTN_GAP: i32 = 6;
 const SIDEBAR_BUTTONS_TOP: i32 = 78;
 
 fn sidebar_button_rect(index: i32, show_coords: bool) -> Rect {
     let x0 = render::board_w(show_coords) + SIDEBAR_PAD;
     let x1 = render::logical_w(show_coords) - SIDEBAR_PAD;
-    let y0 = SIDEBAR_BUTTONS_TOP + index * (BTN_H + BTN_GAP);
+    let y0 = SIDEBAR_BUTTONS_TOP + index * (render::BTN_H + BTN_GAP);
     Rect {
         x0,
         y0,
         x1,
-        y1: y0 + BTN_H,
+        y1: y0 + render::BTN_H,
     }
 }
 
@@ -366,9 +366,10 @@ fn move_notation(mv: &Move, is_capture: bool) -> String {
     )
 }
 
-fn draw_menu(c: &mut Canvas, show_coords: bool, level: u8) {
+fn draw_menu(c: &mut Canvas, show_coords: bool, level: u8, mouse: Option<(i32, i32)>) {
     let lw = render::logical_w(show_coords);
     let lh = render::logical_h(show_coords);
+    let hovered = |r: &Rect| mouse.map(|(mx, my)| r.contains(mx, my)).unwrap_or(false);
     c.fill_rect(0, 0, lw, lh, render::COL_PAGE_BG);
     c.draw_text_centered(lw / 2, 60, "KERES", 6, render::COL_STATUS);
     c.draw_text_centered(lw / 2, 140, "9X9 STACKING CHESS", 2, render::COL_COORD);
@@ -394,24 +395,34 @@ fn draw_menu(c: &mut Canvas, show_coords: bool, level: u8) {
         c.draw_text_centered(rect.cx(), rect.cy() - 5, &(i + 1).to_string(), 1, color);
     }
     for (rect, label, _) in menu_mode_buttons(show_coords) {
-        c.stroke_rect(rect.x0, rect.y0, rect.x1, rect.y1, 2, render::COL_STATUS);
-        c.draw_text_centered(rect.cx(), rect.cy() - 5, label, 1, render::COL_STATUS);
+        render::draw_button(
+            c,
+            rect.x0,
+            rect.y0,
+            rect.x1,
+            rect.y1,
+            label,
+            true,
+            hovered(&rect),
+        );
     }
     if save::any_exist() {
         let rect = menu_load_button(show_coords);
-        c.stroke_rect(rect.x0, rect.y0, rect.x1, rect.y1, 2, render::COL_SELECT);
-        c.draw_text_centered(
-            rect.cx(),
-            rect.cy() - 5,
+        render::draw_button(
+            c,
+            rect.x0,
+            rect.y0,
+            rect.x1,
+            rect.y1,
             "4: LOAD GAME",
-            1,
-            render::COL_SELECT,
+            true,
+            hovered(&rect),
         );
     }
     c.draw_text_centered(lw / 2, lh - 30, "ESC TO QUIT", 1, render::COL_COORD);
 }
 
-fn draw_load_screen(c: &mut Canvas, app: &App, scroll: i32) {
+fn draw_load_screen(c: &mut Canvas, app: &App, scroll: i32, mouse: Option<(i32, i32)>) {
     let show_coords = app.show_coords;
     let lw = render::logical_w(show_coords);
     let lh = render::logical_h(show_coords);
@@ -456,11 +467,21 @@ fn draw_load_screen(c: &mut Canvas, app: &App, scroll: i32) {
     }
 
     let back = load_back_button_rect(show_coords);
-    render::draw_button(c, back.x0, back.y0, back.x1, back.y1, "BACK", true);
+    let back_hovered = mouse.map(|(mx, my)| back.contains(mx, my)).unwrap_or(false);
+    render::draw_button(
+        c,
+        back.x0,
+        back.y0,
+        back.x1,
+        back.y1,
+        "BACK",
+        true,
+        back_hovered,
+    );
     c.draw_text_centered(lw / 2, lh - 20, "ESC TO GO BACK", 1, render::COL_COORD);
 }
 
-fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32) {
+fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i32, i32)>) {
     let x0 = render::board_w(app.show_coords);
     let lw = render::logical_w(app.show_coords);
     let lh = render::logical_h(app.show_coords);
@@ -480,7 +501,10 @@ fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32) {
     c.draw_text(x0 + SIDEBAR_PAD, 44, &status, 1, render::COL_STATUS);
 
     for (rect, label, _, enabled) in sidebar_buttons(app) {
-        render::draw_button(c, rect.x0, rect.y0, rect.x1, rect.y1, &label, enabled);
+        let hovered = enabled && mouse.map(|(mx, my)| rect.contains(mx, my)).unwrap_or(false);
+        render::draw_button(
+            c, rect.x0, rect.y0, rect.x1, rect.y1, &label, enabled, hovered,
+        );
     }
 
     c.draw_text(
@@ -536,7 +560,7 @@ fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i32
     let lh = render::logical_h(show_coords);
 
     c.fill_rect(0, 0, lw, lh, render::COL_PAGE_BG);
-    draw_sidebar(c, app, history_scroll);
+    draw_sidebar(c, app, history_scroll, mouse);
 
     for y in 0..9i32 {
         for x in 0..9i32 {
@@ -698,19 +722,20 @@ fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i32
             let rect = &rects[i];
             let hovered = mouse.map(|(mx, my)| rect.contains(mx, my)).unwrap_or(false);
             let label = move_choice_label(&app.game, mv);
-            render::draw_dialog_button(c, rect.x0, rect.y0, rect.x1, rect.y1, &label, hovered);
+            render::draw_button(c, rect.x0, rect.y0, rect.x1, rect.y1, &label, true, hovered);
         }
         let close = close_button_rect(show_coords);
         let close_hovered = mouse
             .map(|(mx, my)| close.contains(mx, my))
             .unwrap_or(false);
-        render::draw_dialog_button(
+        render::draw_button(
             c,
             close.x0,
             close.y0,
             close.x1,
             close.y1,
             "X",
+            true,
             close_hovered,
         );
     }
@@ -727,7 +752,7 @@ fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i32
         let (yes, no) = confirm_menu_buttons(show_coords);
         for (rect, label) in [(&yes, "YES"), (&no, "NO")] {
             let hovered = mouse.map(|(mx, my)| rect.contains(mx, my)).unwrap_or(false);
-            render::draw_dialog_button(c, rect.x0, rect.y0, rect.x1, rect.y1, label, hovered);
+            render::draw_button(c, rect.x0, rect.y0, rect.x1, rect.y1, label, true, hovered);
         }
     }
 }
@@ -767,9 +792,9 @@ fn write_ppm(path: &str, buf: &[u32], w: i32, h: i32) {
     out.write_all(&bytes).unwrap();
 }
 
-/// Optional `KERES_MOUSE=x,y` override for the snapshot tool, so dialog
-/// button hover states (see `render::draw_dialog_button`) can be checked
-/// without a real window.
+/// Optional `KERES_MOUSE=x,y` override for the snapshot tool, so button
+/// hover states (see `render::draw_button`) can be checked without a real
+/// window.
 fn snapshot_mouse() -> Option<(i32, i32)> {
     let raw = std::env::var("KERES_MOUSE").ok()?;
     let (x, y) = raw.split_once(',')?;
@@ -969,10 +994,10 @@ fn run_snapshot(path: &str) {
         h: lh,
     };
     match app.screen {
-        Screen::Menu => draw_menu(&mut canvas, app.show_coords, app.level),
+        Screen::Menu => draw_menu(&mut canvas, app.show_coords, app.level, snapshot_mouse()),
         Screen::Playing => draw_board(&mut canvas, &app, 0, snapshot_mouse()),
         Screen::GameOver => draw_game_over(&mut canvas, &app, 0),
-        Screen::LoadGame => draw_load_screen(&mut canvas, &app, 0),
+        Screen::LoadGame => draw_load_screen(&mut canvas, &app, 0, snapshot_mouse()),
     }
     write_ppm(path, &buffer, lw, lh);
 }
@@ -1208,10 +1233,10 @@ fn main() {
             h: lh,
         };
         match app.screen {
-            Screen::Menu => draw_menu(&mut canvas, show_coords, app.level),
+            Screen::Menu => draw_menu(&mut canvas, show_coords, app.level, logical_mouse),
             Screen::Playing => draw_board(&mut canvas, &app, history_scroll, logical_mouse),
             Screen::GameOver => draw_game_over(&mut canvas, &app, history_scroll),
-            Screen::LoadGame => draw_load_screen(&mut canvas, &app, load_scroll),
+            Screen::LoadGame => draw_load_screen(&mut canvas, &app, load_scroll, logical_mouse),
         }
 
         let out_len = (win_w.max(1) * win_h.max(1)) as usize;

@@ -63,6 +63,12 @@ pub const COL_SELECT: u32 = 0xe0913c;
 pub const COL_SIDEBAR_BG: u32 = 0x1c1b16;
 pub const COL_BTN_DISABLED: u32 = 0x5a5346;
 
+/// The single button height used everywhere in the app — sidebar buttons,
+/// menu buttons, dialog buttons, list-screen buttons — so every clickable
+/// button reads as the same control regardless of which screen it's on.
+pub const BTN_H: i32 = 28;
+pub const BTN_BORDER: i32 = 2;
+
 // Board tile-highlight palette, matched to the Web platform's SVG board
 // (see keres-platform's SVGBoardView.ts / GameController.updateOverlays) so
 // the native and Web clients read the same way. Each is a full-tile alpha
@@ -83,7 +89,7 @@ pub const COL_HL_LAST_MOVE: u32 = 0xe89038;
 pub const COL_HL_LAST_MOVE_A: f32 = 0.45;
 
 /// "Gold" accent from the palette, used for the hover-preview wash and (see
-/// `draw_dialog_button`) for hovered dialog buttons.
+/// `draw_button`) for hovered buttons.
 pub const COL_GOLD: u32 = 0xe1ca58;
 
 pub const COIN_WHITE: u32 = 0xf3ead2;
@@ -439,36 +445,31 @@ pub fn window_to_logical(
     Some((lx.clamp(0, logical_w - 1), ly.clamp(0, logical_h - 1)))
 }
 
-/// Draw a labeled button outline; dims when `enabled` is false.
-pub fn draw_button(c: &mut Canvas, x0: i32, y0: i32, x1: i32, y1: i32, label: &str, enabled: bool) {
-    let color = if enabled {
-        COL_STATUS
-    } else {
-        COL_BTN_DISABLED
-    };
-    c.stroke_rect(x0, y0, x1, y1, 2, color);
-    c.draw_text_centered((x0 + x1) / 2, (y0 + y1) / 2 - 5, label, 1, color);
-}
-
-/// Draw a modal-dialog button (the fullstack/unstack choice prompt, its "X"
-/// close button, and the return-to-menu confirmation): outlined normally,
-/// filled solid gold with inverted text when the mouse hovers it.
-pub fn draw_dialog_button(
+/// Draw the one button style used across the whole app: outlined normally,
+/// filled solid gold with inverted text when the mouse hovers it (matching
+/// what used to be only the modal-dialog buttons' behavior), dimmed and
+/// never hoverable when `enabled` is false.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_button(
     c: &mut Canvas,
     x0: i32,
     y0: i32,
     x1: i32,
     y1: i32,
     label: &str,
+    enabled: bool,
     hovered: bool,
 ) {
     let cx = (x0 + x1) / 2;
     let cy = (y0 + y1) / 2;
-    if hovered {
+    if !enabled {
+        c.stroke_rect(x0, y0, x1, y1, BTN_BORDER, COL_BTN_DISABLED);
+        c.draw_text_centered(cx, cy - 5, label, 1, COL_BTN_DISABLED);
+    } else if hovered {
         c.fill_rect(x0, y0, x1, y1, COL_GOLD);
         c.draw_text_centered(cx, cy - 5, label, 1, COL_PAGE_BG);
     } else {
-        c.stroke_rect(x0, y0, x1, y1, 2, COL_STATUS);
+        c.stroke_rect(x0, y0, x1, y1, BTN_BORDER, COL_STATUS);
         c.draw_text_centered(cx, cy - 5, label, 1, COL_STATUS);
     }
 }
