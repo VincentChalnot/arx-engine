@@ -136,8 +136,6 @@ fn menu_level_boxes(show_coords: bool) -> [Rect; 10] {
     })
 }
 
-/// "RULES" button, top-right corner of the main menu — also present in the
-/// sidebar (see `sidebar_buttons`) while a game is in progress.
 /// "BACK" button on the "new game" page, in the slot right below the 3 mode
 /// buttons — leaves enough room above the "ESC TO GO BACK" hint at the
 /// bottom of the screen (see `draw_new_game`) that the two never overlap.
@@ -1303,6 +1301,7 @@ fn run_snapshot(path: &str) {
                 let cap = false;
                 app.history.push((mv, cap));
             }
+            app.set_sidebar_tab(app::SidebarTab::Moves);
         }
         "nocoords" => {
             app.start_game(Mode::Hotseat);
