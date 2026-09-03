@@ -64,8 +64,9 @@ pub struct App {
     /// AI strength, `MIN_LEVEL`..=`MAX_LEVEL`. Chosen from the menu before
     /// starting a game; see `keres_engine::engine::SearchConfig::for_level`.
     pub level: u8,
-    /// Whether the first-launch mini help modal has already been shown, so
-    /// it only ever appears once per app run.
+    /// Whether the first-launch mini help modal has ever been shown —
+    /// persisted (see `crate::settings`) so it never reappears after the
+    /// very first game a player starts, across restarts.
     help_seen: bool,
     /// True while the first-launch mini help modal is on screen (see
     /// `start_game`/`dismiss_help`).
@@ -88,6 +89,7 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        let settings = crate::settings::load();
         App {
             screen: Screen::Menu,
             mode: Mode::Hotseat,
@@ -102,13 +104,10 @@ impl App {
             last_move: None,
             confirm_menu: false,
             flipped: false,
-            show_threats: true,
-            show_coords: true,
-            // Matches the old fixed-depth-4, always-play-the-best-move
-            // behavior exactly (see `SearchConfig::for_level`), so anyone
-            // who never touches the difficulty slider sees no change.
-            level: 9,
-            help_seen: false,
+            show_threats: settings.show_threats,
+            show_coords: settings.show_coords,
+            level: settings.level,
+            help_seen: settings.help_seen,
             show_help: false,
             show_rules: false,
             sidebar_tab: SidebarTab::Help,
@@ -117,6 +116,15 @@ impl App {
             save_path: None,
             load_entries: Vec::new(),
         }
+    }
+
+    fn persist_settings(&self) {
+        crate::settings::save(&crate::settings::Settings {
+            level: self.level,
+            show_coords: self.show_coords,
+            show_threats: self.show_threats,
+            help_seen: self.help_seen,
+        });
     }
 
     pub fn start_game(&mut self, mode: Mode) {
@@ -140,11 +148,13 @@ impl App {
     }
 
     /// Show the first-launch mini help modal exactly once, ever (see
-    /// `show_help`/`help_seen`).
+    /// `show_help`/`help_seen`) — marked seen and persisted immediately, so
+    /// even quitting mid-modal doesn't bring it back on the next launch.
     fn note_game_launched(&mut self) {
         if !self.help_seen {
             self.help_seen = true;
             self.show_help = true;
+            self.persist_settings();
         }
     }
 
@@ -391,10 +401,12 @@ impl App {
 
     pub fn toggle_threats(&mut self) {
         self.show_threats = !self.show_threats;
+        self.persist_settings();
     }
 
     pub fn toggle_coords(&mut self) {
         self.show_coords = !self.show_coords;
+        self.persist_settings();
     }
 
     pub fn set_level(&mut self, level: u8) {
@@ -402,6 +414,7 @@ impl App {
             keres_engine::engine::constants::MIN_LEVEL,
             keres_engine::engine::constants::MAX_LEVEL,
         );
+        self.persist_settings();
     }
 
     /// Dismiss the first-launch mini help modal (see `show_help`).

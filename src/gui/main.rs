@@ -5,6 +5,7 @@ mod icons;
 mod render;
 mod rules;
 mod save;
+mod settings;
 mod symbols;
 
 use app::{move_choice_label, App, Mode, Screen};
@@ -1091,6 +1092,12 @@ fn snapshot_mouse() -> Option<(i32, i32)> {
 fn run_snapshot(path: &str) {
     use keres_engine::{Board, Color, PieceType};
     save::set_test_dir_override(std::env::temp_dir().join("keres_snapshot_saves"));
+    settings::set_test_dir_override(std::env::temp_dir().join("keres_snapshot_settings"));
+    let _ = std::fs::remove_file(
+        std::env::temp_dir()
+            .join("keres_snapshot_settings")
+            .join("settings.bin"),
+    );
     let mut app = App::new();
     let screen = std::env::var("KERES_SCREEN").unwrap_or_else(|_| "menu".to_string());
     match screen.as_str() {
