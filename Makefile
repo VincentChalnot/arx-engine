@@ -35,7 +35,7 @@ cli:  ## Plain-text CLI (keres): show-moves / engine-move / debug-tree
 server:  ## HTTP server (the binary wire API; see docs/PROTOCOL.md)
 	$(CARGO) build --release --bin server
 
-gui: src/gui/icons.rs src/gui/base.rs src/gui/symbols.rs  ## Native minifb desktop GUI (size-optimized; enables the `gui` feature)
+gui: src/gui/icons.rs src/gui/base.rs src/gui/symbols.rs src/gui/window_icon.rs  ## Native minifb desktop GUI (size-optimized; enables the `gui` feature)
 	$(CARGO) build --profile $(GUI_PROFILE) --bin gui --features gui
 	@# UPX is applied opportunistically — it shrinks the GUI another ~50-60%
 	@# but needs the `upx` binary (dnf install upx / apt install upx). No-op
@@ -104,13 +104,20 @@ src/gui/base.rs: $(BASE_SRCS) scripts/gen_base.py scripts/pixel_raster.py
 src/gui/symbols.rs: $(SYMBOL_SRCS) scripts/gen_symbols.py scripts/pixel_raster.py
 	python3 scripts/gen_symbols.py
 
+# Placeholder source (assets/pixel/icons/king.xcf) until a dedicated splash
+# logo replaces it in scripts/gen_window_icon.py — see that script's header.
+src/gui/window_icon.rs: assets/pixel/icons/king.xcf scripts/gen_window_icon.py scripts/pixel_raster.py
+	python3 scripts/gen_window_icon.py
+
 icons: src/gui/icons.rs  ## Regenerate src/gui/icons.rs from assets/pixel/icons/*.xcf
 
 base: src/gui/base.rs  ## Regenerate src/gui/base.rs from assets/pixel/base/*.xcf
 
 symbols: src/gui/symbols.rs  ## Regenerate src/gui/symbols.rs from assets/pixel/symbols/*.xcf
 
-pixel-assets: icons base symbols  ## Regenerate all generated pixel-art Rust sources
+window-icon: src/gui/window_icon.rs  ## Regenerate src/gui/window_icon.rs (window/taskbar icon)
+
+pixel-assets: icons base symbols window-icon  ## Regenerate all generated pixel-art Rust sources
 
 ##@ Misc
 

@@ -7,6 +7,7 @@ mod rules;
 mod save;
 mod settings;
 mod symbols;
+mod window_icon;
 
 use app::{move_choice_label, App, Mode, Screen};
 use keres_engine::{Move, Piece, Position};
@@ -1471,6 +1472,11 @@ fn main() {
     )
     .expect("unable to open window");
     window.set_target_fps(60);
+    // X11 only (see minifb::Icon) — a no-op TryFrom failure elsewhere is
+    // silently ignored rather than gating window creation on it.
+    if let Ok(icon) = minifb::Icon::try_from(&window_icon::WINDOW_ICON[..]) {
+        window.set_icon(icon);
+    }
 
     let mut logical: Vec<u32> = Vec::new();
     let mut output: Vec<u32> = Vec::new();
