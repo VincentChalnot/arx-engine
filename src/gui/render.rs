@@ -393,6 +393,16 @@ fn blend(base: u32, overlay: u32, alpha: f32) -> u32 {
 /// Nearest-neighbor blit of the fixed logical framebuffer into an
 /// arbitrarily sized output buffer, preserving aspect ratio via letterbox
 /// bars so pixel art is scaled crisply instead of blurred or stretched.
+///
+/// Precomputes the source column/row for every output column/row once
+/// instead of a float divide per output pixel: this loop runs every frame
+/// over the *real* window's pixel count (not the logical canvas's), so at a
+/// large window size — the common case right after a resize — a per-pixel
+/// divide is the single hottest cost in the app, made worse by the `gui`
+/// profile's `opt-level = "z"` (see Cargo.toml), which doesn't autovectorize
+/// it. The lookup tables turn that into O(out_w + out_h) divides instead of
+/// O(out_w * out_h), which is what actually made animations look laggy on a
+/// large/resized window rather than the animation logic itself.
 pub fn blit_to_window(
     logical: &[u32],
     out: &mut [u32],
@@ -408,18 +418,42 @@ pub fn blit_to_window(
     let draw_h = (logical_h as f32 * scale) as i32;
     let off_x = (out_w - draw_w) / 2;
     let off_y = (out_h - draw_h) / 2;
-    for y in 0..out_h {
-        for x in 0..out_w {
-            let idx = (y * out_w + x) as usize;
-            if x < off_x || y < off_y || x >= off_x + draw_w || y >= off_y + draw_h {
-                out[idx] = COL_PAGE_BG;
-                continue;
+
+    // -1 marks a letterbox column/row (outside the scaled canvas).
+    let sx_for: Vec<i32> = (0..out_w)
+        .map(|x| {
+            if x < off_x || x >= off_x + draw_w {
+                -1
+            } else {
+                (((x - off_x) as f32) / scale).clamp(0.0, (logical_w - 1) as f32) as i32
             }
-            let sx = (((x - off_x) as f32) / scale) as i32;
-            let sy = (((y - off_y) as f32) / scale) as i32;
-            let sx = sx.clamp(0, logical_w - 1);
-            let sy = sy.clamp(0, logical_h - 1);
-            out[idx] = logical[(sy * logical_w + sx) as usize];
+        })
+        .collect();
+    let sy_for: Vec<i32> = (0..out_h)
+        .map(|y| {
+            if y < off_y || y >= off_y + draw_h {
+                -1
+            } else {
+                (((y - off_y) as f32) / scale).clamp(0.0, (logical_h - 1) as f32) as i32
+            }
+        })
+        .collect();
+
+    for y in 0..out_h {
+        let sy = sy_for[y as usize];
+        let row_out = &mut out[(y * out_w) as usize..((y + 1) * out_w) as usize];
+        if sy < 0 {
+            row_out.fill(COL_PAGE_BG);
+            continue;
+        }
+        let logical_row = &logical[(sy * logical_w) as usize..((sy + 1) * logical_w) as usize];
+        for x in 0..out_w {
+            let sx = sx_for[x as usize];
+            row_out[x as usize] = if sx < 0 {
+                COL_PAGE_BG
+            } else {
+                logical_row[sx as usize]
+            };
         }
     }
 }
