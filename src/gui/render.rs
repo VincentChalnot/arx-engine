@@ -442,7 +442,66 @@ fn blend(base: u32, overlay: u32, alpha: f32) -> u32 {
 /// it. The lookup tables turn that into O(out_w + out_h) divides instead of
 /// O(out_w * out_h), which is what actually made animations look laggy on a
 /// large/resized window rather than the animation logic itself.
-pub fn blit_to_window(
+/// Per-column/row nearest-neighbor lookup tables for `blit_to_window`,
+/// cached across frames. Recomputing these every frame (as the original
+/// implementation did) meant two heap allocations plus an `out_w + out_h`
+/// pass of float division 60 times a second even when nothing on screen
+/// changed — most frames, the window size and logical canvas size are
+/// identical to the previous frame, so the tables are identical too.
+/// `blit_to_window_cached` only rebuilds them when `(out_w, out_h,
+/// logical_w, logical_h)` actually changes (e.g. the user resizes the
+/// window, or `show_coords` toggles the logical canvas size).
+#[derive(Default)]
+pub struct BlitCache {
+    dims: Option<(i32, i32, i32, i32)>,
+    sx_for: Vec<i32>,
+    sy_for: Vec<i32>,
+}
+
+impl BlitCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn ensure(&mut self, out_w: i32, out_h: i32, logical_w: i32, logical_h: i32) {
+        let dims = (out_w, out_h, logical_w, logical_h);
+        if self.dims == Some(dims) {
+            return;
+        }
+        self.dims = Some(dims);
+
+        let scale = (out_w as f32 / logical_w as f32)
+            .min(out_h as f32 / logical_h as f32)
+            .max(0.05);
+        let draw_w = (logical_w as f32 * scale) as i32;
+        let draw_h = (logical_h as f32 * scale) as i32;
+        let off_x = (out_w - draw_w) / 2;
+        let off_y = (out_h - draw_h) / 2;
+
+        // -1 marks a letterbox column/row (outside the scaled canvas).
+        self.sx_for.clear();
+        self.sx_for.extend((0..out_w).map(|x| {
+            if x < off_x || x >= off_x + draw_w {
+                -1
+            } else {
+                (((x - off_x) as f32) / scale).clamp(0.0, (logical_w - 1) as f32) as i32
+            }
+        }));
+        self.sy_for.clear();
+        self.sy_for.extend((0..out_h).map(|y| {
+            if y < off_y || y >= off_y + draw_h {
+                -1
+            } else {
+                (((y - off_y) as f32) / scale).clamp(0.0, (logical_h - 1) as f32) as i32
+            }
+        }));
+    }
+}
+
+/// Nearest-neighbor scale `logical` into `out`, reusing `cache`'s lookup
+/// tables across frames (see `BlitCache`).
+pub fn blit_to_window_cached(
+    cache: &mut BlitCache,
     logical: &[u32],
     out: &mut [u32],
     out_w: i32,
@@ -450,33 +509,9 @@ pub fn blit_to_window(
     logical_w: i32,
     logical_h: i32,
 ) {
-    let scale = (out_w as f32 / logical_w as f32)
-        .min(out_h as f32 / logical_h as f32)
-        .max(0.05);
-    let draw_w = (logical_w as f32 * scale) as i32;
-    let draw_h = (logical_h as f32 * scale) as i32;
-    let off_x = (out_w - draw_w) / 2;
-    let off_y = (out_h - draw_h) / 2;
-
-    // -1 marks a letterbox column/row (outside the scaled canvas).
-    let sx_for: Vec<i32> = (0..out_w)
-        .map(|x| {
-            if x < off_x || x >= off_x + draw_w {
-                -1
-            } else {
-                (((x - off_x) as f32) / scale).clamp(0.0, (logical_w - 1) as f32) as i32
-            }
-        })
-        .collect();
-    let sy_for: Vec<i32> = (0..out_h)
-        .map(|y| {
-            if y < off_y || y >= off_y + draw_h {
-                -1
-            } else {
-                (((y - off_y) as f32) / scale).clamp(0.0, (logical_h - 1) as f32) as i32
-            }
-        })
-        .collect();
+    cache.ensure(out_w, out_h, logical_w, logical_h);
+    let sx_for = &cache.sx_for;
+    let sy_for = &cache.sy_for;
 
     for y in 0..out_h {
         let sy = sy_for[y as usize];
@@ -495,6 +530,23 @@ pub fn blit_to_window(
             };
         }
     }
+}
+
+/// Uncached one-shot variant — a thin wrapper over `blit_to_window_cached`
+/// for callers (tests, one-off tooling) that don't have a `BlitCache` to
+/// reuse across frames. The live render loop uses `blit_to_window_cached`
+/// directly so its lookup tables persist frame to frame.
+#[cfg(test)]
+fn blit_to_window(
+    logical: &[u32],
+    out: &mut [u32],
+    out_w: i32,
+    out_h: i32,
+    logical_w: i32,
+    logical_h: i32,
+) {
+    let mut cache = BlitCache::new();
+    blit_to_window_cached(&mut cache, logical, out, out_w, out_h, logical_w, logical_h);
 }
 
 /// Map a real window mouse position back into logical canvas coordinates,

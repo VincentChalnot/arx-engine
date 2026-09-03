@@ -1494,6 +1494,7 @@ fn main() {
 
     let mut logical: Vec<u32> = Vec::new();
     let mut output: Vec<u32> = Vec::new();
+    let mut blit_cache = render::BlitCache::new();
     let mut prev_mouse_down = false;
     let mut history_scroll: i32 = 0;
     let mut load_scroll: i32 = 0;
@@ -1785,7 +1786,15 @@ fn main() {
         if output.len() != out_len {
             output.resize(out_len, 0);
         }
-        render::blit_to_window(&logical, &mut output, win_w.max(1), win_h.max(1), lw, lh);
+        render::blit_to_window_cached(
+            &mut blit_cache,
+            &logical,
+            &mut output,
+            win_w.max(1),
+            win_h.max(1),
+            lw,
+            lh,
+        );
 
         window
             .update_with_buffer(&output, win_w.max(1) as usize, win_h.max(1) as usize)
