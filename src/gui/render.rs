@@ -96,12 +96,15 @@ pub const COL_HL_LAST_MOVE_A: f32 = 0.45;
 /// `draw_button`) for hovered buttons.
 pub const COL_GOLD: u32 = 0xe1ca58;
 
-pub const COIN_WHITE: u32 = 0xf3ead2;
-pub const COIN_BLACK: u32 = 0x1c1a16;
-pub const BORDER_ON_WHITE: u32 = 0x1c1a16;
-pub const BORDER_ON_BLACK: u32 = 0xd8cba4;
-pub const FG_ON_WHITE: u32 = 0x1c1a16;
-pub const FG_ON_BLACK: u32 = 0xf3ead2;
+// True white/black rather than the parchment-tinted off-white/off-black
+// these used to be — a white piece's plaque, icon and letter should all
+// actually read as white (and a black piece's as black), not cream/charcoal.
+pub const COIN_WHITE: u32 = 0xffffff;
+pub const COIN_BLACK: u32 = 0x000000;
+pub const BORDER_ON_WHITE: u32 = 0x000000;
+pub const BORDER_ON_BLACK: u32 = 0xffffff;
+pub const FG_ON_WHITE: u32 = 0x000000;
+pub const FG_ON_BLACK: u32 = 0xffffff;
 
 pub struct Canvas<'a> {
     pub buf: &'a mut [u32],
