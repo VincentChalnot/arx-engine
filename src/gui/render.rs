@@ -454,6 +454,13 @@ fn blend(base: u32, overlay: u32, alpha: f32) -> u32 {
 #[derive(Default)]
 pub struct BlitCache {
     dims: Option<(i32, i32, i32, i32)>,
+    off_x: i32,
+    off_y: i32,
+    draw_w: i32,
+    draw_h: i32,
+    // Only cover the drawn body (`draw_w`/`draw_h` wide), not the full
+    // letterboxed output — the two solid-color margins are filled directly
+    // with `fill`/a plain loop instead of an extra branch per pixel.
     sx_for: Vec<i32>,
     sy_for: Vec<i32>,
 }
@@ -473,33 +480,28 @@ impl BlitCache {
         let scale = (out_w as f32 / logical_w as f32)
             .min(out_h as f32 / logical_h as f32)
             .max(0.05);
-        let draw_w = (logical_w as f32 * scale) as i32;
-        let draw_h = (logical_h as f32 * scale) as i32;
-        let off_x = (out_w - draw_w) / 2;
-        let off_y = (out_h - draw_h) / 2;
+        self.draw_w = (logical_w as f32 * scale) as i32;
+        self.draw_h = (logical_h as f32 * scale) as i32;
+        self.off_x = (out_w - self.draw_w) / 2;
+        self.off_y = (out_h - self.draw_h) / 2;
 
-        // -1 marks a letterbox column/row (outside the scaled canvas).
         self.sx_for.clear();
-        self.sx_for.extend((0..out_w).map(|x| {
-            if x < off_x || x >= off_x + draw_w {
-                -1
-            } else {
-                (((x - off_x) as f32) / scale).clamp(0.0, (logical_w - 1) as f32) as i32
-            }
-        }));
+        self.sx_for.extend(
+            (0..self.draw_w)
+                .map(|x| ((x as f32) / scale).clamp(0.0, (logical_w - 1) as f32) as i32),
+        );
         self.sy_for.clear();
-        self.sy_for.extend((0..out_h).map(|y| {
-            if y < off_y || y >= off_y + draw_h {
-                -1
-            } else {
-                (((y - off_y) as f32) / scale).clamp(0.0, (logical_h - 1) as f32) as i32
-            }
-        }));
+        self.sy_for.extend(
+            (0..self.draw_h)
+                .map(|y| ((y as f32) / scale).clamp(0.0, (logical_h - 1) as f32) as i32),
+        );
     }
 }
 
 /// Nearest-neighbor scale `logical` into `out`, reusing `cache`'s lookup
-/// tables across frames (see `BlitCache`).
+/// tables across frames (see `BlitCache`). The body (`draw_w` x `draw_h`,
+/// centered at `off_x`/`off_y`) is copied via a branch-free inner loop;
+/// any letterbox margin around it is filled separately.
 pub fn blit_to_window_cached(
     cache: &mut BlitCache,
     logical: &[u32],
@@ -512,23 +514,22 @@ pub fn blit_to_window_cached(
     cache.ensure(out_w, out_h, logical_w, logical_h);
     let sx_for = &cache.sx_for;
     let sy_for = &cache.sy_for;
+    let (off_x, off_y, draw_w, draw_h) = (cache.off_x, cache.off_y, cache.draw_w, cache.draw_h);
 
     for y in 0..out_h {
-        let sy = sy_for[y as usize];
         let row_out = &mut out[(y * out_w) as usize..((y + 1) * out_w) as usize];
-        if sy < 0 {
+        if y < off_y || y >= off_y + draw_h {
             row_out.fill(COL_PAGE_BG);
             continue;
         }
+        let sy = sy_for[(y - off_y) as usize];
         let logical_row = &logical[(sy * logical_w) as usize..((sy + 1) * logical_w) as usize];
-        for x in 0..out_w {
-            let sx = sx_for[x as usize];
-            row_out[x as usize] = if sx < 0 {
-                COL_PAGE_BG
-            } else {
-                logical_row[sx as usize]
-            };
+        row_out[..off_x.max(0) as usize].fill(COL_PAGE_BG);
+        for (i, sx) in sx_for.iter().enumerate() {
+            row_out[off_x as usize + i] = logical_row[*sx as usize];
         }
+        let right_start = (off_x + draw_w) as usize;
+        row_out[right_start..].fill(COL_PAGE_BG);
     }
 }
 
