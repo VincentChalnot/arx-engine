@@ -36,9 +36,9 @@ impl Rect {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SettingsAction {
-    ToggleThreats,
-    ToggleCoords,
-    ToggleRotateIcons,
+    Threats,
+    Coords,
+    RotateIcons,
 }
 
 /// Full-width toggle buttons for the sidebar's SETTINGS tab (see
@@ -62,7 +62,7 @@ fn settings_tab_buttons(app: &App) -> [(Rect, String, SettingsAction); 3] {
             } else {
                 "SHOW THREATS".to_string()
             },
-            SettingsAction::ToggleThreats,
+            SettingsAction::Threats,
         ),
         (
             rect(1),
@@ -71,7 +71,7 @@ fn settings_tab_buttons(app: &App) -> [(Rect, String, SettingsAction); 3] {
             } else {
                 "SHOW COORDS".to_string()
             },
-            SettingsAction::ToggleCoords,
+            SettingsAction::Coords,
         ),
         (
             rect(2),
@@ -80,7 +80,7 @@ fn settings_tab_buttons(app: &App) -> [(Rect, String, SettingsAction); 3] {
             } else {
                 "ROTATE OPPONENT ICONS".to_string()
             },
-            SettingsAction::ToggleRotateIcons,
+            SettingsAction::RotateIcons,
         ),
     ]
 }
@@ -1762,11 +1762,9 @@ fn main() {
                                     for (rect, _label, action) in settings_tab_buttons(&app) {
                                         if rect.contains(lx, ly) {
                                             match action {
-                                                SettingsAction::ToggleThreats => {
-                                                    app.toggle_threats()
-                                                }
-                                                SettingsAction::ToggleCoords => app.toggle_coords(),
-                                                SettingsAction::ToggleRotateIcons => {
+                                                SettingsAction::Threats => app.toggle_threats(),
+                                                SettingsAction::Coords => app.toggle_coords(),
+                                                SettingsAction::RotateIcons => {
                                                     app.toggle_rotate_opponent_icons()
                                                 }
                                             }
