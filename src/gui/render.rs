@@ -262,6 +262,45 @@ impl<'a> Canvas<'a> {
     ) {
         self.draw_wide_bitmap(cx - width / 2, y, rows, width, color);
     }
+
+    /// Same source bit as `draw_wide_bitmap` reads (see that for the row/
+    /// word packing), but sampled through an arbitrary `scale` factor
+    /// (`<1.0` shrinks, `>1.0` grows) via nearest-neighbor lookup instead of
+    /// a 1:1 blit — used to drop the full-size splash wordmark into the
+    /// in-game sidebar title at a smaller size without needing separate
+    /// small-size pixel art. A destination pixel is "on" when its nearest
+    /// source pixel is on; this is a plain point-sample, so heavy shrinking
+    /// can drop thin one-pixel strokes — replace with hand-drawn small-size
+    /// art (see `docs/GUI.md`) if that becomes visible at the chosen scale.
+    pub fn draw_wide_bitmap_scaled<const N: usize>(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        rows: &[[u32; N]],
+        width: i32,
+        scale: f32,
+        color: u32,
+    ) {
+        let height = rows.len() as i32;
+        let dst_w = ((width as f32) * scale).round() as i32;
+        let dst_h = ((height as f32) * scale).round() as i32;
+        let bit_at = |sx: i32, sy: i32| -> bool {
+            let word = sx / 32;
+            let bit_in_word = sx % 32;
+            rows[sy as usize][word as usize] >> (31 - bit_in_word) & 1 == 1
+        };
+        for dy in 0..dst_h {
+            let sy = ((dy as f32) / scale) as i32;
+            let sy = sy.min(height - 1);
+            for dx in 0..dst_w {
+                let sx = ((dx as f32) / scale) as i32;
+                let sx = sx.min(width - 1);
+                if bit_at(sx, sy) {
+                    self.put(x0 + dx, y0 + dy, color);
+                }
+            }
+        }
+    }
 }
 
 fn icon_for(pt: PieceType) -> PieceIcon {

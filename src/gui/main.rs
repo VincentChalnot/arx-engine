@@ -351,9 +351,13 @@ fn sidebar_buttons(app: &App) -> [(Rect, String, SidebarAction, bool); 7] {
 
 const HISTORY_TOP: i32 = 334;
 const HISTORY_ROW_H: i32 = 13;
+// Extra breathing room between the HELP|MOVES|SETTINGS tab strip and its
+// content, so the content doesn't feel glued to the tab underline.
+const TAB_CONTENT_GAP: i32 = 10;
+const CONTENT_TOP: i32 = HISTORY_TOP + TAB_CONTENT_GAP;
 
 fn history_visible_rows(show_coords: bool) -> i32 {
-    (render::logical_h(show_coords) - HISTORY_TOP - SIDEBAR_PAD) / HISTORY_ROW_H
+    (render::logical_h(show_coords) - CONTENT_TOP - SIDEBAR_PAD) / HISTORY_ROW_H
 }
 
 /// Screen-space (col, row) for a board position, honoring the board flip.
@@ -623,7 +627,18 @@ fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i
     let lw = render::logical_w(app.show_coords);
     let lh = render::logical_h(app.show_coords);
     c.fill_rect(x0, 0, lw, lh, render::COL_SIDEBAR_BG);
-    c.draw_text(x0 + SIDEBAR_PAD, 14, "KERES", 2, render::COL_STATUS);
+    // Same crest+wordmark art as the splash screen/main menu (see
+    // `draw_wordmark`), shrunk to fit the sidebar — tune `SIDEBAR_TITLE_SCALE`
+    // here to resize it.
+    const SIDEBAR_TITLE_SCALE: f32 = 0.4;
+    c.draw_wide_bitmap_scaled(
+        x0 + SIDEBAR_PAD,
+        6,
+        &splash::TITLE,
+        splash::TITLE_W as i32,
+        SIDEBAR_TITLE_SCALE,
+        render::COL_STATUS,
+    );
 
     let status = if app.ai_thinking {
         format!("AI IS THINKING{}", ".".repeat(app.thinking_dots()))
@@ -682,7 +697,7 @@ fn draw_sidebar(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i
                 .take(visible as usize)
                 .enumerate()
             {
-                let y = HISTORY_TOP + row as i32 * HISTORY_ROW_H;
+                let y = CONTENT_TOP + row as i32 * HISTORY_ROW_H;
                 let mut line = format!("{}.", n);
                 if let Some((mv, cap)) = white {
                     line.push(' ');
@@ -767,14 +782,14 @@ fn draw_sidebar_help(c: &mut Canvas, app: &App, x0: i32, lw: i32) {
     let Some((bottom, top)) = app.hovered_piece_help() else {
         c.draw_text(
             x0 + SIDEBAR_PAD,
-            HISTORY_TOP,
+            CONTENT_TOP,
             "HOVER A PIECE TO SEE",
             1,
             render::COL_COORD,
         );
         c.draw_text(
             x0 + SIDEBAR_PAD,
-            HISTORY_TOP + 14,
+            CONTENT_TOP + 14,
             "ITS MOVES",
             1,
             render::COL_COORD,
@@ -782,7 +797,7 @@ fn draw_sidebar_help(c: &mut Canvas, app: &App, x0: i32, lw: i32) {
         return;
     };
 
-    let mut y = HISTORY_TOP;
+    let mut y = CONTENT_TOP;
     for piece in [Some(bottom), top].into_iter().flatten() {
         c.draw_icon(
             x0 + SIDEBAR_PAD,
