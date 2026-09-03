@@ -411,11 +411,12 @@ fn move_notation(mv: &Move, is_capture: bool) -> String {
 /// Crest-over-wordmark composition shared by the splash screen and main
 /// menu (see `draw_splash`/`draw_menu`) — `splash::LOGO` centered above
 /// `splash::TITLE`, bottom-aligned to `bottom_y` so callers can drop it in
-/// wherever the old bitmap-font "KERES" text used to sit.
-fn draw_wordmark(c: &mut Canvas, cx: i32, bottom_y: i32, color: u32) {
-    const GAP: i32 = 8;
+/// wherever the old bitmap-font "KERES" text used to sit. `gap` is the
+/// logo-to-title spacing in logical pixels — tune per caller (see
+/// `draw_splash`'s/`draw_menu`'s call sites just below).
+fn draw_wordmark(c: &mut Canvas, cx: i32, bottom_y: i32, gap: i32, color: u32) {
     let title_y = bottom_y - splash::TITLE_H as i32;
-    let logo_y = title_y - GAP - splash::LOGO_H as i32;
+    let logo_y = title_y - gap - splash::LOGO_H as i32;
     c.draw_wide_bitmap_centered(cx, logo_y, &splash::LOGO, splash::LOGO_W as i32, color);
     c.draw_wide_bitmap_centered(cx, title_y, &splash::TITLE, splash::TITLE_W as i32, color);
 }
@@ -428,8 +429,19 @@ fn draw_menu(c: &mut Canvas, show_coords: bool, mouse: Option<(i32, i32)>) {
     let lh = render::logical_h(show_coords);
     let hovered = |r: &Rect| mouse.map(|(mx, my)| r.contains(mx, my)).unwrap_or(false);
     c.fill_rect(0, 0, lw, lh, render::COL_PAGE_BG);
-    draw_wordmark(c, lw / 2, 120, render::COL_STATUS);
-    c.draw_text_centered(lw / 2, 140, "9X9 STACKING CHESS", 2, render::COL_COORD);
+    // Adjust these two to move the menu's logo/title/baseline block: raise
+    // or lower the whole group by changing `wordmark_bottom_y`, or move just
+    // the baseline relative to it via `baseline_y`.
+    let wordmark_bottom_y = 148;
+    let baseline_y = wordmark_bottom_y + 20;
+    draw_wordmark(c, lw / 2, wordmark_bottom_y, 8, render::COL_STATUS);
+    c.draw_text_centered(
+        lw / 2,
+        baseline_y,
+        "THE ART OF ABSTRACT PLAY",
+        1,
+        render::COL_COORD,
+    );
     let has_saves = save::any_exist();
     for (rect, label, action) in menu_buttons(show_coords) {
         let enabled = action != MenuAction::LoadGame || has_saves;
@@ -522,17 +534,24 @@ fn draw_splash(c: &mut Canvas, show_coords: bool) {
     let lw = render::logical_w(show_coords);
     let lh = render::logical_h(show_coords);
     c.fill_rect(0, 0, lw, lh, render::COL_PAGE_BG);
-    draw_wordmark(c, lw / 2, lh / 2, render::COL_STATUS);
+    // Adjust these to move the splash screen's logo/title/baseline block:
+    // `wordmark_bottom_y` raises/lowers the whole group, the `16` passed to
+    // `draw_wordmark` is the logo-to-title gap, and `baseline_y`/
+    // `prompt_y` are relative to the wordmark's bottom edge.
+    let wordmark_bottom_y = lh / 2 - 30;
+    let baseline_y = wordmark_bottom_y + 16;
+    let prompt_y = baseline_y + 40;
+    draw_wordmark(c, lw / 2, wordmark_bottom_y, 16, render::COL_STATUS);
     c.draw_text_centered(
         lw / 2,
-        lh / 2 + 20,
-        "9X9 STACKING CHESS",
-        2,
+        baseline_y,
+        "THE ART OF ABSTRACT PLAY",
+        1,
         render::COL_COORD,
     );
     c.draw_text_centered(
         lw / 2,
-        lh / 2 + 60,
+        prompt_y,
         "CLICK OR PRESS ANY KEY TO CONTINUE",
         1,
         render::COL_COORD,
