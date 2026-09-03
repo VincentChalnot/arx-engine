@@ -45,7 +45,9 @@ pub enum Mode {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Screen {
+    Splash,
     Menu,
+    NewGame,
     Playing,
     GameOver,
     LoadGame,
@@ -124,7 +126,7 @@ impl App {
     pub fn new() -> Self {
         let settings = crate::settings::load();
         App {
-            screen: Screen::Menu,
+            screen: Screen::Splash,
             mode: Mode::Hotseat,
             game: Game::new(),
             selected: None,
@@ -472,6 +474,25 @@ impl App {
             keres_engine::engine::constants::MAX_LEVEL,
         );
         self.persist_settings();
+    }
+
+    /// Leave the splash screen for the main menu — on a click or a key press
+    /// only; it never advances on its own.
+    pub fn dismiss_splash(&mut self) {
+        if self.screen == Screen::Splash {
+            self.screen = Screen::Menu;
+        }
+    }
+
+    /// Open the dedicated "new game" page (AI difficulty + mode select) from
+    /// the simplified main menu.
+    pub fn open_new_game_screen(&mut self) {
+        self.screen = Screen::NewGame;
+    }
+
+    /// Leave the "new game" page without starting anything.
+    pub fn close_new_game_screen(&mut self) {
+        self.screen = Screen::Menu;
     }
 
     /// Dismiss the first-launch mini help modal (see `show_help`).

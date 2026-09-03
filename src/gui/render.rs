@@ -57,7 +57,11 @@ pub fn logical_h(show_coords: bool) -> i32 {
 pub const COL_PAGE_BG: u32 = 0x14140f;
 pub const COL_LIGHT_SQ: u32 = 0xf5f5dc;
 pub const COL_DARK_SQ: u32 = 0xd2b48c;
-pub const COL_COORD: u32 = 0x9c8a63;
+/// Bronze accent from the palette — originally just the coordinate-label
+/// color, now also the fill for `ButtonStyle::Primary` buttons (see
+/// `draw_footer_credit`'s "CREATED BY" line for its other use).
+pub const COL_BRONZE: u32 = 0x9c8a63;
+pub const COL_COORD: u32 = COL_BRONZE;
 pub const COL_STATUS: u32 = 0xe8dcc0;
 pub const COL_SELECT: u32 = 0xe0913c;
 pub const COL_SIDEBAR_BG: u32 = 0x1c1b16;
@@ -445,10 +449,22 @@ pub fn window_to_logical(
     Some((lx.clamp(0, logical_w - 1), ly.clamp(0, logical_h - 1)))
 }
 
-/// Draw the one button style used across the whole app: outlined normally,
-/// filled solid gold with inverted text when the mouse hovers it (matching
-/// what used to be only the modal-dialog buttons' behavior), dimmed and
-/// never hoverable when `enabled` is false.
+/// Visual weight of a button. `Normal` is outlined; `Primary` is filled
+/// bronze to draw the eye to the one standout action on a screen (e.g. the
+/// main menu's NEW GAME). Both share the same gold hover and disabled
+/// treatment — see `draw_button_styled`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ButtonStyle {
+    Normal,
+    Primary,
+}
+
+/// Draw the default (outlined) button style used across most of the app:
+/// outlined normally, filled solid gold with inverted text when the mouse
+/// hovers it (matching what used to be only the modal-dialog buttons'
+/// behavior), dimmed and never hoverable when `enabled` is false. Thin
+/// wrapper over `draw_button_styled` — see that for the filled `Primary`
+/// look.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_button(
     c: &mut Canvas,
@@ -460,6 +476,35 @@ pub fn draw_button(
     enabled: bool,
     hovered: bool,
 ) {
+    draw_button_styled(
+        c,
+        x0,
+        y0,
+        x1,
+        y1,
+        label,
+        ButtonStyle::Normal,
+        enabled,
+        hovered,
+    );
+}
+
+/// Draw a button in the given `ButtonStyle`. `Primary` fills solid bronze
+/// (dark text on top, matching the disabled/hover contrast rules below)
+/// instead of `Normal`'s outline, so it reads as the emphasized action on
+/// its screen even before the mouse reaches it.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_button_styled(
+    c: &mut Canvas,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    label: &str,
+    style: ButtonStyle,
+    enabled: bool,
+    hovered: bool,
+) {
     let cx = (x0 + x1) / 2;
     let cy = (y0 + y1) / 2;
     if !enabled {
@@ -467,6 +512,9 @@ pub fn draw_button(
         c.draw_text_centered(cx, cy - 5, label, 1, COL_BTN_DISABLED);
     } else if hovered {
         c.fill_rect(x0, y0, x1, y1, COL_GOLD);
+        c.draw_text_centered(cx, cy - 5, label, 1, COL_PAGE_BG);
+    } else if style == ButtonStyle::Primary {
+        c.fill_rect(x0, y0, x1, y1, COL_BRONZE);
         c.draw_text_centered(cx, cy - 5, label, 1, COL_PAGE_BG);
     } else {
         c.stroke_rect(x0, y0, x1, y1, BTN_BORDER, COL_STATUS);

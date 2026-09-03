@@ -43,6 +43,37 @@ enum SidebarAction {
     Rules,
 }
 
+/// The four buttons on the simplified main menu.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MenuAction {
+    NewGame,
+    LoadGame,
+    Rules,
+    Exit,
+}
+
+/// NEW GAME / LOAD GAME / RULES / EXIT, stacked in the same slot the old
+/// mode buttons used to occupy — see `draw_menu`.
+fn menu_buttons(show_coords: bool) -> [(Rect, &'static str, MenuAction); 4] {
+    let bw = 460;
+    let bh = render::BTN_H;
+    let cx = render::logical_w(show_coords) / 2;
+    let gap = 10;
+    let top = 260;
+    let rect = |i: i32| Rect {
+        x0: cx - bw / 2,
+        y0: top + i * (bh + gap),
+        x1: cx + bw / 2,
+        y1: top + i * (bh + gap) + bh,
+    };
+    [
+        (rect(0), "NEW GAME", MenuAction::NewGame),
+        (rect(1), "LOAD GAME", MenuAction::LoadGame),
+        (rect(2), "RULES", MenuAction::Rules),
+        (rect(3), "EXIT", MenuAction::Exit),
+    ]
+}
+
 fn menu_mode_buttons(show_coords: bool) -> [(Rect, &'static str, Mode); 3] {
     let bw = 460;
     let bh = render::BTN_H;
@@ -106,27 +137,14 @@ fn menu_level_boxes(show_coords: bool) -> [Rect; 10] {
 
 /// "RULES" button, top-right corner of the main menu — also present in the
 /// sidebar (see `sidebar_buttons`) while a game is in progress.
-fn menu_rules_button_rect(show_coords: bool) -> Rect {
-    let bw = 90;
-    let bh = render::BTN_H;
-    let pad = 14;
-    let lw = render::logical_w(show_coords);
-    Rect {
-        x0: lw - pad - bw,
-        y0: pad,
-        x1: lw - pad,
-        y1: pad + bh,
-    }
-}
-
-fn menu_load_button(show_coords: bool) -> Rect {
+/// "BACK" button on the "new game" page, in the slot right below the 3 mode
+/// buttons — leaves enough room above the "ESC TO GO BACK" hint at the
+/// bottom of the screen (see `draw_new_game`) that the two never overlap.
+fn new_game_back_button_rect(show_coords: bool) -> Rect {
     let bw = 460;
     let bh = render::BTN_H;
     let gap = 10;
     let cx = render::logical_w(show_coords) / 2;
-    // 12px below the 3rd mode button, leaving enough room above the
-    // "ESC TO QUIT" line at the bottom of the screen (see draw_menu) that
-    // the two never overlap.
     let top = 260 + 3 * bh + 2 * gap + 12;
     Rect {
         x0: cx - bw / 2,
@@ -390,20 +408,48 @@ fn move_notation(mv: &Move, is_capture: bool) -> String {
     )
 }
 
-fn draw_menu(c: &mut Canvas, show_coords: bool, level: u8, mouse: Option<(i32, i32)>) {
+/// The simplified main menu: title, subtitle, and the four top-level actions
+/// (NEW GAME / LOAD GAME / RULES / EXIT). AI difficulty and side selection
+/// live on the dedicated `draw_new_game` page instead.
+fn draw_menu(c: &mut Canvas, show_coords: bool, mouse: Option<(i32, i32)>) {
     let lw = render::logical_w(show_coords);
     let lh = render::logical_h(show_coords);
     let hovered = |r: &Rect| mouse.map(|(mx, my)| r.contains(mx, my)).unwrap_or(false);
     c.fill_rect(0, 0, lw, lh, render::COL_PAGE_BG);
     c.draw_text_centered(lw / 2, 60, "KERES", 6, render::COL_STATUS);
     c.draw_text_centered(lw / 2, 140, "9X9 STACKING CHESS", 2, render::COL_COORD);
-    c.draw_text_centered(
-        lw / 2,
-        178,
-        "CLICK A PIECE, THEN A HIGHLIGHTED TILE",
-        1,
-        render::COL_COORD,
-    );
+    let has_saves = save::any_exist();
+    for (rect, label, action) in menu_buttons(show_coords) {
+        let enabled = action != MenuAction::LoadGame || has_saves;
+        let style = if action == MenuAction::NewGame {
+            render::ButtonStyle::Primary
+        } else {
+            render::ButtonStyle::Normal
+        };
+        render::draw_button_styled(
+            c,
+            rect.x0,
+            rect.y0,
+            rect.x1,
+            rect.y1,
+            label,
+            style,
+            enabled,
+            enabled && hovered(&rect),
+        );
+    }
+    draw_footer_credit(c, lw, lh);
+}
+
+/// The dedicated "new game" page, opened from the main menu's NEW GAME
+/// button: AI difficulty and side selection, previously on the main menu
+/// itself (see `draw_menu`).
+fn draw_new_game(c: &mut Canvas, show_coords: bool, level: u8, mouse: Option<(i32, i32)>) {
+    let lw = render::logical_w(show_coords);
+    let lh = render::logical_h(show_coords);
+    let hovered = |r: &Rect| mouse.map(|(mx, my)| r.contains(mx, my)).unwrap_or(false);
+    c.fill_rect(0, 0, lw, lh, render::COL_PAGE_BG);
+    c.draw_text_centered(lw / 2, 60, "NEW GAME", 5, render::COL_STATUS);
     c.draw_text_centered(lw / 2, 202, "AI DIFFICULTY", 1, render::COL_COORD);
     for (i, rect) in menu_level_boxes(show_coords).into_iter().enumerate() {
         let selected = level as usize == i + 1;
@@ -430,31 +476,58 @@ fn draw_menu(c: &mut Canvas, show_coords: bool, level: u8, mouse: Option<(i32, i
             hovered(&rect),
         );
     }
-    if save::any_exist() {
-        let rect = menu_load_button(show_coords);
-        render::draw_button(
-            c,
-            rect.x0,
-            rect.y0,
-            rect.x1,
-            rect.y1,
-            "4: LOAD GAME",
-            true,
-            hovered(&rect),
-        );
-    }
-    let rules = menu_rules_button_rect(show_coords);
+    let back = new_game_back_button_rect(show_coords);
     render::draw_button(
         c,
-        rules.x0,
-        rules.y0,
-        rules.x1,
-        rules.y1,
-        "RULES",
+        back.x0,
+        back.y0,
+        back.x1,
+        back.y1,
+        "BACK",
         true,
-        hovered(&rules),
+        hovered(&back),
     );
-    c.draw_text_centered(lw / 2, lh - 30, "ESC TO QUIT", 1, render::COL_COORD);
+    c.draw_text_centered(lw / 2, lh - 20, "ESC TO GO BACK", 1, render::COL_COORD);
+}
+
+/// "Created by ... - Play online at playkeres.com", shown on the splash
+/// screen and the main menu — gone as soon as a game is in progress (see
+/// `draw_board`'s Playing screen, which never calls this).
+fn draw_footer_credit(c: &mut Canvas, lw: i32, lh: i32) {
+    c.draw_text_centered(
+        lw / 2,
+        lh - 20,
+        "CREATED BY VINCENT CHALNOT - PLAY ONLINE AT PLAYKERES.COM",
+        1,
+        render::COL_COORD,
+    );
+}
+
+/// The splash screen: the game's logo/title (placeholder bitmap-font text
+/// until the dedicated pixel-art splash graphics land, see
+/// `scripts/gen_window_icon.py`'s header for the equivalent situation on
+/// the window icon) plus the footer credit line. Dismissed on a click or a
+/// key press only — it never advances on its own.
+fn draw_splash(c: &mut Canvas, show_coords: bool) {
+    let lw = render::logical_w(show_coords);
+    let lh = render::logical_h(show_coords);
+    c.fill_rect(0, 0, lw, lh, render::COL_PAGE_BG);
+    c.draw_text_centered(lw / 2, lh / 2 - 60, "KERES", 6, render::COL_STATUS);
+    c.draw_text_centered(
+        lw / 2,
+        lh / 2 + 20,
+        "9X9 STACKING CHESS",
+        2,
+        render::COL_COORD,
+    );
+    c.draw_text_centered(
+        lw / 2,
+        lh / 2 + 60,
+        "CLICK OR PRESS ANY KEY TO CONTINUE",
+        1,
+        render::COL_COORD,
+    );
+    draw_footer_credit(c, lw, lh);
 }
 
 fn draw_load_screen(c: &mut Canvas, app: &App, scroll: i32, mouse: Option<(i32, i32)>) {
@@ -965,11 +1038,18 @@ fn draw_game_over(c: &mut Canvas, app: &App, history_scroll: i32) {
     );
 }
 
-/// "CLOSE" button, top-right corner of the fullscreen rules modal (same spot
-/// the menu's own RULES button sits, since the two screens never show at
-/// once).
+/// "CLOSE" button, top-right corner of the fullscreen rules modal.
 fn rules_close_button_rect(show_coords: bool) -> Rect {
-    menu_rules_button_rect(show_coords)
+    let bw = 90;
+    let bh = render::BTN_H;
+    let pad = 14;
+    let lw = render::logical_w(show_coords);
+    Rect {
+        x0: lw - pad - bw,
+        y0: pad,
+        x1: lw - pad,
+        y1: pad + bh,
+    }
 }
 
 const RULES_GRID_TOP: i32 = 136;
@@ -1106,8 +1186,8 @@ fn snapshot_mouse() -> Option<(i32, i32)> {
 }
 
 /// Headless render-to-file path used only for local visual verification
-/// (`KERES_SNAPSHOT=<path>.ppm KERES_SCREEN=menu|playing|selected|stacked|
-/// gameover|flipped|threats|history|nocoords|hover_friendly|hover_threat|
+/// (`KERES_SNAPSHOT=<path>.ppm KERES_SCREEN=menu|new_game|playing|selected|
+/// stacked|gameover|flipped|threats|history|nocoords|hover_friendly|hover_threat|
 /// hover_stack|last_move|confirm_menu|stacked_close_hover|load_game|rules|
 /// rules_in_game|quick_help|help_tab|help_tab_stack|help_tab_empty|
 /// move_anim_start|move_anim_mid`,
@@ -1126,7 +1206,12 @@ fn run_snapshot(path: &str) {
     let mut app = App::new();
     let screen = std::env::var("KERES_SCREEN").unwrap_or_else(|_| "menu".to_string());
     match screen.as_str() {
-        "menu" => {}
+        "splash" => {}
+        "menu" => app.dismiss_splash(),
+        "new_game" => {
+            app.dismiss_splash();
+            app.open_new_game_screen();
+        }
         "rules" => app.open_rules(),
         "rules_in_game" => {
             app.start_game(Mode::Hotseat);
@@ -1352,7 +1437,9 @@ fn run_snapshot(path: &str) {
         h: lh,
     };
     match app.screen {
-        Screen::Menu => draw_menu(&mut canvas, app.show_coords, app.level, snapshot_mouse()),
+        Screen::Splash => draw_splash(&mut canvas, app.show_coords),
+        Screen::Menu => draw_menu(&mut canvas, app.show_coords, snapshot_mouse()),
+        Screen::NewGame => draw_new_game(&mut canvas, app.show_coords, app.level, snapshot_mouse()),
         Screen::Playing => draw_board(&mut canvas, &app, 0, snapshot_mouse()),
         Screen::GameOver => draw_game_over(&mut canvas, &app, 0),
         Screen::LoadGame => draw_load_screen(&mut canvas, &app, 0, snapshot_mouse()),
@@ -1466,7 +1553,26 @@ fn main() {
                     }
                 } else {
                     match app.screen {
+                        Screen::Splash => app.dismiss_splash(),
                         Screen::Menu => {
+                            for (rect, _label, action) in menu_buttons(show_coords) {
+                                if rect.contains(lx, ly) {
+                                    match action {
+                                        MenuAction::NewGame => app.open_new_game_screen(),
+                                        MenuAction::LoadGame => {
+                                            if save::any_exist() {
+                                                app.open_load_screen();
+                                                load_scroll = 0;
+                                            }
+                                        }
+                                        MenuAction::Rules => app.open_rules(),
+                                        MenuAction::Exit => should_quit = true,
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        Screen::NewGame => {
                             let mut handled = false;
                             for (i, rect) in menu_level_boxes(show_coords).into_iter().enumerate() {
                                 if rect.contains(lx, ly) {
@@ -1483,16 +1589,8 @@ fn main() {
                                     break;
                                 }
                             }
-                            if !handled
-                                && save::any_exist()
-                                && menu_load_button(show_coords).contains(lx, ly)
-                            {
-                                app.open_load_screen();
-                                load_scroll = 0;
-                                handled = true;
-                            }
-                            if !handled && menu_rules_button_rect(show_coords).contains(lx, ly) {
-                                app.open_rules();
+                            if !handled && new_game_back_button_rect(show_coords).contains(lx, ly) {
+                                app.close_new_game_screen();
                             }
                         }
                         Screen::Playing => {
@@ -1581,8 +1679,10 @@ fn main() {
                 app.close_rules();
             } else {
                 match app.screen {
+                    Screen::Splash => app.dismiss_splash(),
                     // The only place ESC quits the app outright.
                     Screen::Menu => should_quit = true,
+                    Screen::NewGame => app.close_new_game_screen(),
                     Screen::Playing => {
                         if app.pending.is_some() {
                             app.cancel_choice();
@@ -1597,6 +1697,10 @@ fn main() {
                 }
             }
         }
+
+        if app.screen == Screen::Splash && !window.get_keys_pressed(KeyRepeat::No).is_empty() {
+            app.dismiss_splash();
+        }
         if window.is_key_pressed(Key::U, KeyRepeat::No) && app.screen == Screen::Playing {
             app.undo();
         }
@@ -1608,7 +1712,7 @@ fn main() {
                     break;
                 }
             }
-        } else if app.screen == Screen::Menu {
+        } else if app.screen == Screen::NewGame {
             for (key, mode) in [
                 (Key::Key1, Mode::Hotseat),
                 (Key::Key2, Mode::VsAiWhite),
@@ -1619,10 +1723,6 @@ fn main() {
                     history_scroll = 0;
                 }
             }
-            if window.is_key_pressed(Key::Key4, KeyRepeat::No) && save::any_exist() {
-                app.open_load_screen();
-                load_scroll = 0;
-            }
         }
 
         let mut canvas = Canvas {
@@ -1631,7 +1731,9 @@ fn main() {
             h: lh,
         };
         match app.screen {
-            Screen::Menu => draw_menu(&mut canvas, show_coords, app.level, logical_mouse),
+            Screen::Splash => draw_splash(&mut canvas, show_coords),
+            Screen::Menu => draw_menu(&mut canvas, show_coords, logical_mouse),
+            Screen::NewGame => draw_new_game(&mut canvas, show_coords, app.level, logical_mouse),
             Screen::Playing => draw_board(&mut canvas, &app, history_scroll, logical_mouse),
             Screen::GameOver => draw_game_over(&mut canvas, &app, history_scroll),
             Screen::LoadGame => draw_load_screen(&mut canvas, &app, load_scroll, logical_mouse),
