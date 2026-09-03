@@ -1,10 +1,40 @@
 //! Game state machine: menu / playing / game-over, click handling and the
 //! background AI-search thread.
 
-use keres_engine::{Color, Game, Move, MoveGenerator, Position, PotentialMove};
+use keres_engine::{Color, Game, Move, MoveGenerator, Piece, Position, PotentialMove};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::Instant;
+
+/// How long a piece takes to slide from its source tile to its destination
+/// (see `App::anim`) — short enough to never feel like it's in the way of
+/// the next move, long enough to actually read as motion.
+pub const MOVE_ANIM_MS: u64 = 150;
+
+/// An in-flight slide animation for the piece (or stack) that just moved —
+/// purely cosmetic, doesn't gate input: a human can select/move again while
+/// it's still playing, same as before animations existed.
+pub struct MoveAnim {
+    pub from: Position,
+    pub to: Position,
+    /// The piece as it ends up at `to` after the move (post-merge,
+    /// post-promotion) — what actually gets drawn sliding in.
+    pub piece: Piece,
+    started: Instant,
+}
+
+impl MoveAnim {
+    /// Linear 0.0..=1.0 progress, clamped; `None` once the animation has run
+    /// its course (the caller should drop it and draw the real board as-is).
+    pub fn progress(&self) -> Option<f32> {
+        let t = self.started.elapsed().as_secs_f32() / (MOVE_ANIM_MS as f32 / 1000.0);
+        if t >= 1.0 {
+            None
+        } else {
+            Some(t)
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -55,6 +85,9 @@ pub struct App {
     /// highlight where it came from and landed. Cleared on a fresh/resumed
     /// game and rewound by `undo`.
     pub last_move: Option<Move>,
+    /// In-flight slide animation for the piece that just moved, see
+    /// `MoveAnim`.
+    pub anim: Option<MoveAnim>,
     /// True while the "return to main menu?" confirmation prompt is shown
     /// over the Playing screen (see `request_menu_confirm`).
     pub confirm_menu: bool,
@@ -102,6 +135,7 @@ impl App {
             ai_thinking: false,
             ai_thinking_since: None,
             last_move: None,
+            anim: None,
             confirm_menu: false,
             flipped: false,
             show_threats: settings.show_threats,
@@ -138,6 +172,7 @@ impl App {
         self.ai_thinking = false;
         self.ai_thinking_since = None;
         self.last_move = None;
+        self.anim = None;
         self.confirm_menu = false;
         self.history.clear();
         self.undo_stack.clear();
@@ -202,6 +237,7 @@ impl App {
         self.ai_thinking = false;
         self.ai_thinking_since = None;
         self.last_move = None;
+        self.anim = None;
         self.confirm_menu = false;
         self.history.clear();
         self.undo_stack.clear();
@@ -307,6 +343,16 @@ impl App {
         }
     }
 
+    /// Per-frame housekeeping: drops the move-slide animation once it's run
+    /// its course. Call once per frame, same as `poll_ai`.
+    pub fn tick_anim(&mut self) {
+        if let Some(anim) = &self.anim {
+            if anim.progress().is_none() {
+                self.anim = None;
+            }
+        }
+    }
+
     /// Number of dots (1..=3) to show after "AI IS THINKING", cycling once
     /// per second so the message visibly animates while the search runs.
     pub fn thinking_dots(&self) -> usize {
@@ -327,6 +373,16 @@ impl App {
         self.history.push((mv, is_capture));
         self.undo_stack.push((mv, undo));
         self.last_move = Some(mv);
+        // Animate whatever actually ended up on the destination square —
+        // already reflects any stack merge or promotion `make` just did.
+        if let Some(piece) = self.game.board.get_piece(&mv.to) {
+            self.anim = Some(MoveAnim {
+                from: mv.from,
+                to: mv.to,
+                piece: *piece,
+                started: Instant::now(),
+            });
+        }
         self.selected = None;
         self.legal.clear();
         self.pending = None;
@@ -359,6 +415,7 @@ impl App {
             }
         }
         self.last_move = self.undo_stack.last().map(|(mv, _)| *mv);
+        self.anim = None;
         self.selected = None;
         self.legal.clear();
         self.pending = None;

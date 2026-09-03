@@ -820,9 +820,14 @@ fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i32
     // `render::draw_piece`) relies on: a lower screen row is always drawn
     // after the row above it, so its stack correctly paints over that row's
     // content instead of being painted over by it.
+    let anim_progress = app.anim.as_ref().and_then(|a| a.progress().map(|t| (a, t)));
     for sy in 0..9i32 {
         for sx in 0..9i32 {
             let board_p = board_pos(sx, sy, app.flipped);
+            if anim_progress.is_some_and(|(a, _)| board_p == a.to) {
+                // Drawn separately below, sliding in from `a.from`.
+                continue;
+            }
             if let Some(piece) = app.game.board.get_piece(&board_p) {
                 let tx = gutter + sx * TILE_W;
                 let ty = topbar + sy * TILE_H;
@@ -830,6 +835,25 @@ fn draw_board(c: &mut Canvas, app: &App, history_scroll: i32, mouse: Option<(i32
                 render::draw_piece(c, tx, ty, piece as &Piece, upside_down);
             }
         }
+    }
+
+    // The just-moved piece (or stack), sliding from its source tile to its
+    // destination — purely cosmetic (see `App::anim`), eased out so it
+    // settles rather than stopping abruptly.
+    if let Some((anim, t)) = anim_progress {
+        let eased = 1.0 - (1.0 - t) * (1.0 - t);
+        let (fx, fy) = screen_coord(anim.from, app.flipped);
+        let (tx, ty) = screen_coord(anim.to, app.flipped);
+        let px = gutter as f32 + (fx as f32 + (tx - fx) as f32 * eased) * TILE_W as f32;
+        let py = topbar as f32 + (fy as f32 + (ty - fy) as f32 * eased) * TILE_H as f32;
+        let upside_down = is_upside_down(anim.piece.color, app.flipped);
+        render::draw_piece(
+            c,
+            px.round() as i32,
+            py.round() as i32,
+            &anim.piece,
+            upside_down,
+        );
     }
 
     // Big "this creates a stack" arrow: when a piece is selected and the
@@ -1085,7 +1109,8 @@ fn snapshot_mouse() -> Option<(i32, i32)> {
 /// (`KERES_SNAPSHOT=<path>.ppm KERES_SCREEN=menu|playing|selected|stacked|
 /// gameover|flipped|threats|history|nocoords|hover_friendly|hover_threat|
 /// hover_stack|last_move|confirm_menu|stacked_close_hover|load_game|rules|
-/// rules_in_game|quick_help|help_tab|help_tab_stack|help_tab_empty`,
+/// rules_in_game|quick_help|help_tab|help_tab_stack|help_tab_empty|
+/// move_anim_start|move_anim_mid`,
 /// optionally with `KERES_MOUSE=x,y` to check dialog-button hover). Never
 /// touches a window or the real display; save I/O is redirected to a throwaway
 /// temp directory so it never writes into the developer's real save folder.
@@ -1200,6 +1225,19 @@ fn run_snapshot(path: &str) {
         "hover_friendly" => {
             app.start_game(Mode::Hotseat);
             app.set_hovered(Some(Position::new(3, 6)));
+        }
+        "move_anim_start" => {
+            app.start_game(Mode::Hotseat);
+            app.dismiss_help();
+            app.click_square(Position::new(2, 6));
+            app.click_square(Position::new(1, 5));
+        }
+        "move_anim_mid" => {
+            app.start_game(Mode::Hotseat);
+            app.dismiss_help();
+            app.click_square(Position::new(2, 6));
+            app.click_square(Position::new(1, 5));
+            std::thread::sleep(std::time::Duration::from_millis(60));
         }
         "help_tab" => {
             app.start_game(Mode::Hotseat);
@@ -1360,6 +1398,7 @@ fn main() {
 
     while window.is_open() && !should_quit {
         app.poll_ai();
+        app.tick_anim();
 
         let show_coords = app.show_coords;
         let lw = render::logical_w(show_coords);
