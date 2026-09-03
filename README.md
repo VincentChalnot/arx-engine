@@ -34,10 +34,13 @@ for the full illustrated rules.
 - **CLI** (`src/main.rs`, binary target `keres`): inspect legal moves, ask the
   engine for a move, or dump a full search tree for debugging — plain text,
   no UI.
-- **Native GUI** (`src/gui/`, binary target `gui`, behind the `gui` feature): a
-  self-contained [minifb](https://github.com/emoon/minifb) desktop app for
-  hotseat or vs-AI play — no browser, no server. Build with
-  `cargo build --bin gui --features gui`.
+- **Native GUI** (`src/gui/`, Cargo bin target `gui`, behind the `gui`
+  feature): a self-contained [minifb](https://github.com/emoon/minifb)
+  desktop app for hotseat or vs-AI play — no browser, no server. Build with
+  `cargo build --bin gui --features gui`; the file it ships as (a GitHub
+  Release download, or `make gui`'s output) is named `keres` /
+  `keres.exe`, or `Keres.app` on macOS — see `make macos-app` and
+  `scripts/package_macos_app.sh`.
 
 ## The AI
 

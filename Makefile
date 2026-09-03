@@ -15,15 +15,20 @@ CARGO      ?= cargo
 GUI_PROFILE := gui
 
 # Binaries land in target/<profile>/ — release for cli/server, the named
-# profile for the gui.
+# profile for the gui. Cargo's own build output there is still named `gui`
+# (that's the [[bin]] target in Cargo.toml — renaming it would collide with
+# the `keres` CLI target); GUI_BIN is the name the GUI actually ships under,
+# produced by copying that output — see the `gui` target below.
 CLI_BIN    := target/release/keres
 SERVER_BIN := target/release/server
-GUI_BIN    := target/$(GUI_PROFILE)/gui
+GUI_CARGO_BIN := target/$(GUI_PROFILE)/gui
+GUI_BIN    := target/$(GUI_PROFILE)/keres
 
 .DEFAULT_GOAL := all
 
 .PHONY: all help cli server gui test test-core fmt fmt-fix clippy check sizes \
-        run-cli run-server run-gui clean icons base symbols splash pixel-assets
+        run-cli run-server run-gui clean icons base symbols splash app-icon \
+        pixel-assets macos-app
 
 all: cli server gui  ## Build all three binaries
 
@@ -35,8 +40,9 @@ cli:  ## Plain-text CLI (keres): show-moves / engine-move / debug-tree
 server:  ## HTTP server (the binary wire API; see docs/PROTOCOL.md)
 	$(CARGO) build --release --bin server
 
-gui: src/gui/icons.rs src/gui/base.rs src/gui/symbols.rs src/gui/window_icon.rs src/gui/splash.rs  ## Native minifb desktop GUI (size-optimized; enables the `gui` feature)
+gui: src/gui/icons.rs src/gui/base.rs src/gui/symbols.rs src/gui/window_icon.rs src/gui/splash.rs assets/generated/keres.ico  ## Native minifb desktop GUI (size-optimized; enables the `gui` feature); ships as GUI_BIN (keres)
 	$(CARGO) build --profile $(GUI_PROFILE) --bin gui --features gui
+	@cp $(GUI_CARGO_BIN) $(GUI_BIN)
 	@# UPX is applied opportunistically — it shrinks the GUI another ~50-60%
 	@# but needs the `upx` binary (dnf install upx / apt install upx). No-op
 	@# if absent, so the target stays deterministic without it.
@@ -89,6 +95,9 @@ run-server: server  ## Run the HTTP server (PORT env var selects the listen port
 run-gui: gui  ## Run the native GUI
 	./$(GUI_BIN)
 
+macos-app: gui  ## Assemble dist/Keres.app (macOS only — needs keres.icns; see scripts/package_macos_app.sh)
+	scripts/package_macos_app.sh $(GUI_BIN) dist
+
 ##@ Pixel assets
 
 ICON_SRCS := $(wildcard assets/pixel/icons/*.xcf)
@@ -110,6 +119,15 @@ src/gui/window_icon.rs: assets/pixel/logo.xcf scripts/gen_window_icon.py scripts
 src/gui/splash.rs: assets/pixel/logo.xcf assets/pixel/title.xcf scripts/gen_splash.py scripts/pixel_raster.py
 	python3 scripts/gen_splash.py
 
+# gen_app_icon.py writes both files in one run; keres.icns depends on
+# keres.ico with no recipe of its own so a stale .icns doesn't trigger the
+# script twice in the same build (portable to Make < 4.3, which lacks
+# grouped-target `&:` rules for "one recipe, multiple outputs").
+assets/generated/keres.ico: assets/pixel/logo.xcf scripts/gen_app_icon.py scripts/pixel_raster.py
+	python3 scripts/gen_app_icon.py
+
+assets/generated/keres.icns: assets/generated/keres.ico
+
 icons: src/gui/icons.rs  ## Regenerate src/gui/icons.rs from assets/pixel/icons/*.xcf
 
 base: src/gui/base.rs  ## Regenerate src/gui/base.rs from assets/pixel/base/*.xcf
@@ -120,7 +138,9 @@ window-icon: src/gui/window_icon.rs  ## Regenerate src/gui/window_icon.rs (windo
 
 splash: src/gui/splash.rs  ## Regenerate src/gui/splash.rs (splash-screen crest/wordmark) from assets/pixel/logo.xcf, title.xcf
 
-pixel-assets: icons base symbols window-icon splash  ## Regenerate all generated pixel-art Rust sources
+app-icon: assets/generated/keres.ico assets/generated/keres.icns  ## Regenerate keres.ico/keres.icns (Windows PE resource / macOS .app icon)
+
+pixel-assets: icons base symbols window-icon splash app-icon  ## Regenerate all generated pixel-art sources
 
 ##@ Misc
 

@@ -37,15 +37,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # `cargo_bin` is Cargo's own [[bin]] output name (fixed — see the
+          # Makefile comment on GUI_CARGO_BIN); the shipped file is always
+          # named `keres`/`keres.exe`, either directly (dist_name) or as the
+          # macOS .app bundle's executable (scripts/package_macos_app.sh).
           - os: ubuntu-latest
             asset: keres-gui-linux-x86_64
-            bin: gui
+            cargo_bin: gui
+            package: binary
+            dist_name: keres
           - os: windows-latest
             asset: keres-gui-windows-x86_64
-            bin: gui.exe
+            cargo_bin: gui.exe
+            package: binary
+            dist_name: keres.exe
           - os: macos-latest
             asset: keres-gui-macos-x86_64
-            bin: gui
+            cargo_bin: gui
+            package: app
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -66,7 +75,11 @@ jobs:
         shell: bash
         run: |
           mkdir dist
-          cp "target/gui/${{ matrix.bin }}" dist/
+          if [ "${{ matrix.package }}" = "app" ]; then
+            scripts/package_macos_app.sh "target/gui/${{ matrix.cargo_bin }}" dist "${GITHUB_REF_NAME#v}"
+          else
+            cp "target/gui/${{ matrix.cargo_bin }}" "dist/${{ matrix.dist_name }}"
+          fi
           cp README.md LICENSE dist/
           tar czf "${{ matrix.asset }}.tar.gz" -C dist .
 

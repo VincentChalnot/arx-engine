@@ -4,11 +4,12 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Vincent Chalnot"]
 description = "A library for the abstract game Keres"
+build = "build.rs"
 
 [features]
 # Native minifb GUI binary. Off by default so the server/CLI stay free of the
 # X11/minifb dependency (keeps the Docker server build clean).
-gui = ["dep:minifb", "dep:dirs-next", "dep:winapi"]
+gui = ["dep:minifb", "dep:dirs-next", "dep:winres"]
 
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
@@ -64,12 +65,13 @@ inherits = "release"
 debug = 1
 strip = false
 
-[target.'cfg(windows)'.dependencies]
-# The GUI's window icon: minifb's `Icon` only accepts a path to an .ico
-# file on Windows, so the embedded ARGB buffer is turned into an HICON
-# directly (src/gui/platform_icon.rs). minifb already depends on winapi
-# there, so this pulls no new crate into the tree.
-winapi = { version = "0.3", features = ["minwindef", "windef", "wingdi", "winuser"], optional = true }
-
 [target.x86_64-unknown-linux-musl.dependencies]
 mimalloc = "0.1.43"
+
+[target.'cfg(windows)'.build-dependencies]
+# Embeds assets/generated/keres.ico as a Win32 PE resource (see build.rs) so
+# the .exe itself carries the icon — Explorer, the taskbar, and Alt-Tab all
+# pick it up with no runtime API call needed. Only pulled in for the `gui`
+# feature build (build.rs itself is `#[cfg(feature = "gui")]`-gated), so the
+# keres/server binaries stay unaffected.
+winres = { version = "0.1", optional = true }

@@ -25,3 +25,6 @@ target/
 
 # Python bytecode cache (scripts/*.py)
 __pycache__/
+
+# make macos-app output (Keres.app)
+/dist/

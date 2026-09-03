@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod app;
 mod base;
 mod font;
@@ -9,9 +11,10 @@ mod save;
 mod settings;
 mod splash;
 mod symbols;
-// Only the platforms whose icon API can consume it (see platform_icon.rs)
-// pull the 32 KB ARGB buffer in.
-#[cfg(any(target_os = "linux", windows))]
+// Only X11 sets its window icon from this buffer at runtime (see
+// platform_icon.rs) — Windows gets its icon from the PE resource build.rs
+// embeds, macOS from the .app bundle's .icns.
+#[cfg(target_os = "linux")]
 mod window_icon;
 
 use app::{move_choice_label, App, Mode, Screen};
