@@ -88,6 +88,27 @@ pub fn check_game_over(board: &Board, moves_without_capture: u8) -> GameOverResu
         };
     }
 
+    let white_non_king_count = white_pieces.iter().filter(|(p, _)| !p.is_king()).count();
+    let black_non_king_count = black_pieces.iter().filter(|(p, _)| !p.is_king()).count();
+
+    // Capturing every one of the opponent's pieces except their king wins
+    // the game outright, even if the winning side's own material would
+    // otherwise be judged insufficient to checkmate.
+    if black_non_king_count == 0 && white_non_king_count > 0 {
+        return GameOverResult {
+            game_over: true,
+            white_wins: true,
+            draw: false,
+        };
+    }
+    if white_non_king_count == 0 && black_non_king_count > 0 {
+        return GameOverResult {
+            game_over: true,
+            white_wins: false,
+            draw: false,
+        };
+    }
+
     if moves_without_capture >= 40 {
         return GameOverResult {
             game_over: true,

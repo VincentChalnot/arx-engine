@@ -138,8 +138,8 @@ fn menu_mode_buttons(show_coords: bool) -> [(Rect, &'static str, Mode); 3] {
                 x1: cx + bw / 2,
                 y1: top + bh,
             },
-            "1: HOTSEAT (SAME KEYBOARD)",
-            Mode::Hotseat,
+            "VS AI - PLAY WHITE",
+            Mode::VsAiWhite,
         ),
         (
             Rect {
@@ -148,8 +148,8 @@ fn menu_mode_buttons(show_coords: bool) -> [(Rect, &'static str, Mode); 3] {
                 x1: cx + bw / 2,
                 y1: top + 2 * bh + gap,
             },
-            "2: VS AI - PLAY WHITE",
-            Mode::VsAiWhite,
+            "VS AI - PLAY BLACK",
+            Mode::VsAiBlack,
         ),
         (
             Rect {
@@ -158,8 +158,8 @@ fn menu_mode_buttons(show_coords: bool) -> [(Rect, &'static str, Mode); 3] {
                 x1: cx + bw / 2,
                 y1: top + 3 * bh + 2 * gap,
             },
-            "3: VS AI - PLAY BLACK",
-            Mode::VsAiBlack,
+            "HOTSEAT (SAME KEYBOARD)",
+            Mode::Hotseat,
         ),
     ]
 }
@@ -261,9 +261,9 @@ fn format_unix_timestamp(secs: i64) -> String {
 
 fn side_label(mode: Mode) -> &'static str {
     match mode {
-        Mode::Hotseat => "HOTSEAT",
         Mode::VsAiWhite => "WHITE (VS AI)",
         Mode::VsAiBlack => "BLACK (VS AI)",
+        Mode::Hotseat => "HOTSEAT",
     }
 }
 
@@ -509,7 +509,7 @@ fn draw_new_game(c: &mut Canvas, show_coords: bool, level: u8, mouse: Option<(i3
     let hovered = |r: &Rect| mouse.map(|(mx, my)| r.contains(mx, my)).unwrap_or(false);
     c.fill_rect(0, 0, lw, lh, render::COL_PAGE_BG);
     c.draw_text_centered(lw / 2, 60, "NEW GAME", 5, render::COL_STATUS);
-    c.draw_text_centered(lw / 2, 202, "AI DIFFICULTY", 1, render::COL_COORD);
+    c.draw_text_centered(lw / 2, 190, "AI DIFFICULTY", 1, render::COL_COORD);
     for (i, rect) in menu_level_boxes(show_coords).into_iter().enumerate() {
         let selected = level as usize == i + 1;
         let color = if selected {
