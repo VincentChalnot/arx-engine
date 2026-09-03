@@ -128,23 +128,45 @@ hover cue (see below). Rasterized by `scripts/gen_symbols.py` into
 with `Canvas::draw_bitmap` — a width/bit-packing-only sibling of `draw_icon`
 that doesn't assume a square glyph or support `rotate180`.
 
-### Generating `icons.rs` / `base.rs` / `symbols.rs`
+### Splash art sources
 
-All three are rasterized by the same headless-GIMP pipeline
+`assets/pixel/logo.xcf` (46×37 crest) and `assets/pixel/title.xcf` (200×42
+wordmark) are the splash-screen and main-menu art, rasterized by
+`scripts/gen_splash.py` into `src/gui/splash.rs`. `draw_wordmark` in
+`main.rs` stacks the crest over the wordmark and bottom-aligns the pair,
+so the splash screen and the menu can each drop it where the old
+bitmap-font "KERES" text used to sit.
+
+Both are too wide for the one-`u32`-per-row packing the icons/base/symbols
+use, so a row here is `ceil(width / 32)` `u32` words, leftmost word first,
+each word left-aligned on its own first column (bit 31) — a short final
+word pads on its low end, which keeps the decode loop uniform. They are
+drawn with `Canvas::draw_wide_bitmap` rather than `draw_bitmap`.
+
+### Generating `icons.rs` / `base.rs` / `symbols.rs` / `splash.rs`
+
+All four are rasterized by the same headless-GIMP pipeline
 (`scripts/pixel_raster.py`, Script-Fu batch mode via
 `flatpak run org.gimp.GIMP`): a pixel with red channel < 128 is "on", packed
 into a `[u32; height]` bitmask (bit `width - 1` = leftmost column).
-`scripts/gen_icons.py`, `scripts/gen_base.py` and `scripts/gen_symbols.py`
-each call into it and write their respective generated file.
+Script-Fu emits each row as a string of `'0'`/`'1'` rather than a packed
+integer — its fixnum arithmetic silently overflows into useless floats once
+a row needs more bits than a machine int holds, which the 200px-wide
+wordmark hits — so the bit packing happens Python-side, where integers are
+arbitrary precision. `scripts/gen_icons.py`, `scripts/gen_base.py`,
+`scripts/gen_symbols.py` and `scripts/gen_splash.py` each call into it and
+write their respective generated file.
 `format_rows`'s `indent` parameter controls the leading whitespace on each
 packed row so the output matches what `cargo fmt` expects at that call
 site's nesting depth (4 for a top-level `const` array as in `base.rs`, 12
 for one nested two levels deep in a match arm as in `icons.rs`/
 `symbols.rs`) — get it wrong and the file still compiles, but `cargo fmt
---check` will flag it. `make gui` (or `make pixel-assets`) regenerates all
-three automatically whenever a `.xcf` is newer than its generated output —
-see the `##@ Pixel assets` section of the `Makefile`. Never hand-edit
-`src/gui/icons.rs`, `src/gui/base.rs` or `src/gui/symbols.rs`.
+--check` will flag it (`gen_splash.py` does its own formatting instead —
+its rows are arrays, not single values). `make gui` (or `make
+pixel-assets`) regenerates all of them automatically whenever a `.xcf` is
+newer than its generated output — see the `##@ Pixel assets` section of the
+`Makefile`. Never hand-edit `src/gui/icons.rs`, `src/gui/base.rs`,
+`src/gui/symbols.rs` or `src/gui/splash.rs`.
 
 `assets/pixel/tile.xcf` is an authoring aid (a blank canvas matching one
 board tile) — not a build input.
@@ -249,10 +271,14 @@ snapshot mode used for exactly this kind of visual check:
 KERES_SNAPSHOT=/tmp/out.ppm KERES_SCREEN=<screen> cargo run --features gui --bin gui
 ```
 
-`KERES_SCREEN` selects a canned scenario (see `run_snapshot` in `main.rs`):
-`menu`, `playing`, `selected`, `stacked`, `gameover`, `flipped`, `threats`,
-`history`, `nocoords`, `hover_friendly`, `hover_threat`, `hover_stack`,
-`last_move`, `confirm_menu`, `stacked_close_hover`, `load_game`. Add
+`KERES_SCREEN` selects a canned scenario — `run_snapshot`'s `match` in
+`main.rs` is the authoritative list, since this one drifts as screens are
+added: `splash`, `menu`, `new_game`, `rules`, `rules_in_game`,
+`quick_help`, `load_game`, `playing`, `selected`, `stacked`, `gameover`,
+`flipped`, `threats`, `history`, `nocoords`, `hover_friendly`,
+`hover_threat`, `hover_stack`, `last_move`, `confirm_menu`,
+`stacked_close_hover`, `help_tab`, `help_tab_stack`, `help_tab_empty`,
+`move_anim_start`, `move_anim_mid`. Add
 `KERES_MOUSE=x,y` (logical-canvas pixel coordinates) to also check a dialog
 button's hover state. It never opens a window or touches the display, so it
 works over SSH/CI; save I/O is also redirected to a throwaway temp directory

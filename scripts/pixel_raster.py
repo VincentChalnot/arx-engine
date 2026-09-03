@@ -14,19 +14,17 @@ GIMP_APP_ID = "org.gimp.GIMP"
 
 SCHEME_TEMPLATE = r"""
 (let* ((image (car (gimp-file-load RUN-NONINTERACTIVE "{path}" "{name}")))
-       (layer (vector-ref (car (gimp-image-get-layers image)) 0)))
-  (define (row-value y)
-    (let loop ((x 0) (acc 0))
+       (layer (car (gimp-image-flatten image))))
+  (define (row-string y)
+    (let loop ((x 0) (acc '()))
       (if (= x {width})
-          acc
+          (list->string (reverse acc))
           (loop (+ x 1)
-                (if (< (car (car (gimp-drawable-get-pixel layer x y))) 128)
-                    (+ acc (expt 2 (- {maxbit} x)))
-                    acc)))))
+                (cons (if (< (car (car (gimp-drawable-get-pixel layer x y))) 128) #\1 #\0) acc)))))
   (let loop ((y 0))
     (if (< y {height})
         (begin
-          (display (row-value y))
+          (display (row-string y))
           (display " ")
           (loop (+ y 1)))))
   (newline))
@@ -34,10 +32,16 @@ SCHEME_TEMPLATE = r"""
 
 
 def rasterize(xcf_path: pathlib.Path, width: int, height: int) -> list[int]:
-    """Rasterize one .xcf into `height` row bitmasks, `width` bits each."""
-    script = SCHEME_TEMPLATE.format(
-        path=str(xcf_path), name=xcf_path.name, width=width, height=height, maxbit=width - 1
-    )
+    """Rasterize one .xcf into `height` row bitmasks, `width` bits each.
+
+    Script-fu emits each row as a "{width}"-char string of '0'/'1' rather
+    than a packed integer — its fixnum `expt`/`+` silently overflows into
+    (useless, astronomically large) floats once a row needs more bits than
+    fit in a machine int, which title-sized (200px-wide) art hits well
+    below 2**64. Packing the bits into an int happens here in Python
+    instead, where integers are arbitrary precision.
+    """
+    script = SCHEME_TEMPLATE.format(path=str(xcf_path), name=xcf_path.name, width=width, height=height)
     cmd = [
         "flatpak", "run", GIMP_APP_ID,
         "-i", "-d", "-f",
@@ -48,8 +52,8 @@ def rasterize(xcf_path: pathlib.Path, width: int, height: int) -> list[int]:
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     for line in result.stdout.splitlines():
         parts = line.split()
-        if len(parts) == height and all(p.isdigit() for p in parts):
-            return [int(p) for p in parts]
+        if len(parts) == height and all(len(p) == width and set(p) <= {"0", "1"} for p in parts):
+            return [int(p, 2) for p in parts]
     sys.stderr.write(result.stdout)
     sys.stderr.write(result.stderr)
     raise RuntimeError(f"failed to extract pixel rows from {xcf_path}")

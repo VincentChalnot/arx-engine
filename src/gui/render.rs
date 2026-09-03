@@ -223,6 +223,45 @@ impl<'a> Canvas<'a> {
             }
         }
     }
+
+    /// Draw a 1-bit bitmap wider than 32px (see `splash::LOGO`/`splash::TITLE`
+    /// — a single row can't fit a `width`-bit mask in one `u32` past 32px,
+    /// unlike `draw_bitmap`'s icons/symbols). Each row is `N = ceil(width /
+    /// 32)` `u32` words, most-significant word first; within each word bit
+    /// 31 is that word's own leftmost column (so a short final word is
+    /// left-aligned, not right-aligned) — see `scripts/gen_splash.py`.
+    pub fn draw_wide_bitmap<const N: usize>(
+        &mut self,
+        x0: i32,
+        y0: i32,
+        rows: &[[u32; N]],
+        width: i32,
+        color: u32,
+    ) {
+        for (ry, words) in rows.iter().enumerate() {
+            for (wi, &word) in words.iter().enumerate() {
+                let base_col = wi as i32 * 32;
+                let valid = (width - base_col).min(32);
+                for k in 0..valid {
+                    if (word >> (31 - k)) & 1 == 1 {
+                        self.put(x0 + base_col + k, y0 + ry as i32, color);
+                    }
+                }
+            }
+        }
+    }
+
+    /// `draw_wide_bitmap`, horizontally centered on `cx` (top edge still `y`).
+    pub fn draw_wide_bitmap_centered<const N: usize>(
+        &mut self,
+        cx: i32,
+        y: i32,
+        rows: &[[u32; N]],
+        width: i32,
+        color: u32,
+    ) {
+        self.draw_wide_bitmap(cx - width / 2, y, rows, width, color);
+    }
 }
 
 fn icon_for(pt: PieceType) -> PieceIcon {

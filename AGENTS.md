@@ -41,6 +41,7 @@ Three binaries share one library crate (`keres_engine`, `src/lib.rs`):
 | `src/main.rs`                 | `clap` CLI — subcommands: `show-moves`, `engine-move`, `debug-tree` |
 | `src/gui/`                    | Native minifb GUI binary (`gui` target, `gui` Cargo feature): app state machine, software rasterizer, autosave — ported from micro-keres |
 | `docs/PROTOCOL.md`            | Wire protocol reference — regenerate/re-verify against `server.rs`/`board.rs`/`game.rs`/`moves.rs` if any of those change; do not let it drift |
+| `docs/GUI.md`                 | GUI reference: canvas/layout model, pixel-art asset pipeline, and the headless snapshot workflow for checking a visual change (read it before touching `src/gui/`) |
 
 ## Conventions
 
@@ -86,6 +87,24 @@ cargo run --bin keres -- engine-move  # ask the engine for its best move (plain-
 cargo run --bin keres -- debug-tree --moves <base64> --full-tree   # search-tree debugging
 cargo run --profile gui --bin gui --features gui   # native GUI, size-optimized (or: make run-gui)
 ```
+
+**Never launch the GUI to verify a visual change.** `make run-gui` opens a
+real window on the maintainer's desktop, and a screenshot of that desktop
+captures whatever else they have open. The binary has a headless
+render-to-file path built for exactly this check — see
+[`docs/GUI.md`](docs/GUI.md#verifying-changes-visually) § "Verifying changes
+visually":
+
+```bash
+KERES_SNAPSHOT=/tmp/out.ppm KERES_SCREEN=menu ./target/gui/gui
+magick /tmp/out.ppm -filter point -resize 300% /tmp/out.png   # nearest-neighbor, as the real window scales
+```
+
+It never opens a window or touches the display (so it works over SSH/CI),
+and redirects save/settings I/O to throwaway temp dirs. `KERES_SCREEN`
+selects the scenario (`splash`, `menu`, `playing`, `rules`, `load_game`,
+`hover_*`, …); the authoritative list is `run_snapshot`'s doc comment in
+`src/gui/main.rs`. Add `KERES_MOUSE=x,y` to check a hover state.
 
 No `docker` requirement for engine development — the toolchain runs
 natively. `docker compose up --build` (see `compose.yaml`) is only for

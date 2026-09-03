@@ -6,6 +6,7 @@ mod render;
 mod rules;
 mod save;
 mod settings;
+mod splash;
 mod symbols;
 mod window_icon;
 
@@ -407,6 +408,18 @@ fn move_notation(mv: &Move, is_capture: bool) -> String {
     )
 }
 
+/// Crest-over-wordmark composition shared by the splash screen and main
+/// menu (see `draw_splash`/`draw_menu`) — `splash::LOGO` centered above
+/// `splash::TITLE`, bottom-aligned to `bottom_y` so callers can drop it in
+/// wherever the old bitmap-font "KERES" text used to sit.
+fn draw_wordmark(c: &mut Canvas, cx: i32, bottom_y: i32, color: u32) {
+    const GAP: i32 = 8;
+    let title_y = bottom_y - splash::TITLE_H as i32;
+    let logo_y = title_y - GAP - splash::LOGO_H as i32;
+    c.draw_wide_bitmap_centered(cx, logo_y, &splash::LOGO, splash::LOGO_W as i32, color);
+    c.draw_wide_bitmap_centered(cx, title_y, &splash::TITLE, splash::TITLE_W as i32, color);
+}
+
 /// The simplified main menu: title, subtitle, and the four top-level actions
 /// (NEW GAME / LOAD GAME / RULES / EXIT). AI difficulty and side selection
 /// live on the dedicated `draw_new_game` page instead.
@@ -415,7 +428,7 @@ fn draw_menu(c: &mut Canvas, show_coords: bool, mouse: Option<(i32, i32)>) {
     let lh = render::logical_h(show_coords);
     let hovered = |r: &Rect| mouse.map(|(mx, my)| r.contains(mx, my)).unwrap_or(false);
     c.fill_rect(0, 0, lw, lh, render::COL_PAGE_BG);
-    c.draw_text_centered(lw / 2, 60, "KERES", 6, render::COL_STATUS);
+    draw_wordmark(c, lw / 2, 120, render::COL_STATUS);
     c.draw_text_centered(lw / 2, 140, "9X9 STACKING CHESS", 2, render::COL_COORD);
     let has_saves = save::any_exist();
     for (rect, label, action) in menu_buttons(show_coords) {
@@ -502,16 +515,14 @@ fn draw_footer_credit(c: &mut Canvas, lw: i32, lh: i32) {
     );
 }
 
-/// The splash screen: the game's logo/title (placeholder bitmap-font text
-/// until the dedicated pixel-art splash graphics land, see
-/// `scripts/gen_window_icon.py`'s header for the equivalent situation on
-/// the window icon) plus the footer credit line. Dismissed on a click or a
+/// The splash screen: the game's pixel-art crest and wordmark (see
+/// `draw_wordmark`) plus the footer credit line. Dismissed on a click or a
 /// key press only — it never advances on its own.
 fn draw_splash(c: &mut Canvas, show_coords: bool) {
     let lw = render::logical_w(show_coords);
     let lh = render::logical_h(show_coords);
     c.fill_rect(0, 0, lw, lh, render::COL_PAGE_BG);
-    c.draw_text_centered(lw / 2, lh / 2 - 60, "KERES", 6, render::COL_STATUS);
+    draw_wordmark(c, lw / 2, lh / 2, render::COL_STATUS);
     c.draw_text_centered(
         lw / 2,
         lh / 2 + 20,

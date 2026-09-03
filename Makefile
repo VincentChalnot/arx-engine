@@ -23,7 +23,7 @@ GUI_BIN    := target/$(GUI_PROFILE)/gui
 .DEFAULT_GOAL := all
 
 .PHONY: all help cli server gui test test-core fmt fmt-fix clippy check sizes \
-        run-cli run-server run-gui clean icons base symbols pixel-assets
+        run-cli run-server run-gui clean icons base symbols splash pixel-assets
 
 all: cli server gui  ## Build all three binaries
 
@@ -35,7 +35,7 @@ cli:  ## Plain-text CLI (keres): show-moves / engine-move / debug-tree
 server:  ## HTTP server (the binary wire API; see docs/PROTOCOL.md)
 	$(CARGO) build --release --bin server
 
-gui: src/gui/icons.rs src/gui/base.rs src/gui/symbols.rs src/gui/window_icon.rs  ## Native minifb desktop GUI (size-optimized; enables the `gui` feature)
+gui: src/gui/icons.rs src/gui/base.rs src/gui/symbols.rs src/gui/window_icon.rs src/gui/splash.rs  ## Native minifb desktop GUI (size-optimized; enables the `gui` feature)
 	$(CARGO) build --profile $(GUI_PROFILE) --bin gui --features gui
 	@# UPX is applied opportunistically — it shrinks the GUI another ~50-60%
 	@# but needs the `upx` binary (dnf install upx / apt install upx). No-op
@@ -104,10 +104,11 @@ src/gui/base.rs: $(BASE_SRCS) scripts/gen_base.py scripts/pixel_raster.py
 src/gui/symbols.rs: $(SYMBOL_SRCS) scripts/gen_symbols.py scripts/pixel_raster.py
 	python3 scripts/gen_symbols.py
 
-# Placeholder source (assets/pixel/icons/king.xcf) until a dedicated splash
-# logo replaces it in scripts/gen_window_icon.py — see that script's header.
-src/gui/window_icon.rs: assets/pixel/icons/king.xcf scripts/gen_window_icon.py scripts/pixel_raster.py
+src/gui/window_icon.rs: assets/pixel/logo.xcf scripts/gen_window_icon.py scripts/pixel_raster.py
 	python3 scripts/gen_window_icon.py
+
+src/gui/splash.rs: assets/pixel/logo.xcf assets/pixel/title.xcf scripts/gen_splash.py scripts/pixel_raster.py
+	python3 scripts/gen_splash.py
 
 icons: src/gui/icons.rs  ## Regenerate src/gui/icons.rs from assets/pixel/icons/*.xcf
 
@@ -117,7 +118,9 @@ symbols: src/gui/symbols.rs  ## Regenerate src/gui/symbols.rs from assets/pixel/
 
 window-icon: src/gui/window_icon.rs  ## Regenerate src/gui/window_icon.rs (window/taskbar icon)
 
-pixel-assets: icons base symbols window-icon  ## Regenerate all generated pixel-art Rust sources
+splash: src/gui/splash.rs  ## Regenerate src/gui/splash.rs (splash-screen crest/wordmark) from assets/pixel/logo.xcf, title.xcf
+
+pixel-assets: icons base symbols window-icon splash  ## Regenerate all generated pixel-art Rust sources
 
 ##@ Misc
 
